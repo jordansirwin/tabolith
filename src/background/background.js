@@ -83,6 +83,51 @@ const isBlank = (u) =>
   u.startsWith('chrome-search://');
 const tabUrl = (t) => t.url || t.pendingUrl || '';
 
+// ---------- recently closed tabs ----------
+// Closing a tab drops it from the outline. Remember where it was so that
+// reopening the same URL (e.g. Cmd+Shift+T) puts it back in place.
+const CLOSED_LIMIT = 50;
+
+function rememberClosed(s, n) {
+  const sameGroup = s.nodes.filter((x) => x.groupId === n.groupId);
+  const i = sameGroup.indexOf(n);
+  (s.closed ||= []).unshift({
+    url: n.url,
+    groupId: n.groupId,
+    prevId: sameGroup[i - 1]?.id ?? null,
+    nextId: sameGroup[i + 1]?.id ?? null,
+  });
+  s.closed.length = Math.min(s.closed.length, CLOSED_LIMIT);
+}
+
+// Remove a node from the outline, remembering its position if it had an open tab.
+function removeNode(s, n) {
+  if (n.tabId != null) rememberClosed(s, n);
+  s.nodes.splice(s.nodes.indexOf(n), 1);
+}
+
+// If `url` was recently closed, insert `n` where it used to be. Returns whether it did.
+function restoreClosed(s, n, url) {
+  const ci = (s.closed || []).findIndex((c) => c.url === url && s.groups.some((g) => g.id === c.groupId));
+  if (ci < 0) return false;
+  const [rec] = s.closed.splice(ci, 1);
+  n.groupId = rec.groupId;
+  const inGroup = (id) => s.nodes.findIndex((x) => x.id === id && x.groupId === rec.groupId);
+  let idx = rec.prevId ? inGroup(rec.prevId) + 1 || -1 : -1;
+  if (idx < 0 && rec.nextId) idx = inGroup(rec.nextId);
+  if (idx < 0) {
+    idx = s.nodes.length;
+    for (let i = s.nodes.length - 1; i >= 0; i--) {
+      if (s.nodes[i].groupId === rec.groupId) {
+        idx = i + 1;
+        break;
+      }
+    }
+  }
+  s.nodes.splice(idx, 0, n);
+  return true;
+}
+
 // ---------- model helpers ----------
 function adopt(s, t) {
   const url = tabUrl(t);
@@ -93,11 +138,13 @@ function adopt(s, t) {
   if (!n) {
     n = { id: uid(), groupId: INBOX };
     const opener = t.openerTabId != null && s.nodes.find((x) => x.tabId === t.openerTabId);
-    if (opener) {
-      n.groupId = opener.groupId;
-      s.nodes.splice(s.nodes.indexOf(opener) + 1, 0, n);
-    } else {
-      s.nodes.push(n);
+    if (!restoreClosed(s, n, url)) {
+      if (opener) {
+        n.groupId = opener.groupId;
+        s.nodes.splice(s.nodes.indexOf(opener) + 1, 0, n);
+      } else {
+        s.nodes.push(n);
+      }
     }
   }
   n.tabId = t.id;
@@ -200,15 +247,15 @@ const commands = {
   },
   open: (s, m) => openNode(s.nodes.find((n) => n.id === m.nodeId), true),
   async deleteNode(s, m) {
-    const i = s.nodes.findIndex((x) => x.id === m.nodeId);
-    if (i < 0) return;
-    const [n] = s.nodes.splice(i, 1);
+    const n = s.nodes.find((x) => x.id === m.nodeId);
+    if (!n) return;
+    removeNode(s, n);
     if (n.tabId != null) await closeTabs([n.tabId]);
   },
   async deleteNodes(s, m) {
     const ids = new Set(m.nodeIds);
     const gone = s.nodes.filter((x) => ids.has(x.id));
-    s.nodes = s.nodes.filter((x) => !ids.has(x.id));
+    for (const n of gone) removeNode(s, n);
     const tabIds = gone.filter((n) => n.tabId != null).map((n) => n.tabId);
     if (tabIds.length) await closeTabs(tabIds);
   },
@@ -291,10 +338,10 @@ chrome.tabs.onUpdated.addListener((id, change, t) =>
 // (e.g. Chrome quitting) keep it as a saved entry so it survives a restart.
 chrome.tabs.onRemoved.addListener((id, info) =>
   run((s) => {
-    const i = s.nodes.findIndex((x) => x.tabId === id);
-    if (i >= 0) {
-      if (info.isWindowClosing) s.nodes[i].tabId = null;
-      else s.nodes.splice(i, 1);
+    const n = s.nodes.find((x) => x.tabId === id);
+    if (n) {
+      if (info.isWindowClosing) n.tabId = null;
+      else removeNode(s, n);
     }
     if (s.pendingGroup?.tabId === id) delete s.pendingGroup;
   })
