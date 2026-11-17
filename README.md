@@ -1,4 +1,4 @@
-# 🗿 Tabolith
+# <img src="icons/icon48.png" alt="" width="40" align="top"> Tabolith
 
 > *One does not simply close a tab. One files it, groups it, and lets it rest.*
 
