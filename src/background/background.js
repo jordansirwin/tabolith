@@ -290,6 +290,17 @@ const commands = {
     for (const n of open) n.tabId = null;
     await closeTabs(ids);
   },
+  // Bring the browser window holding this group's tabs to the front (any browser window if none are open).
+  async focusGroup(s, m) {
+    const live = s.nodes.find((n) => n.groupId === m.groupId && n.tabId != null);
+    const tab = live && (await chrome.tabs.get(live.tabId).catch(() => null));
+    const windowId = tab?.windowId ?? (await targetWindowId());
+    if (windowId != null) await chrome.windows.update(windowId, { focused: true });
+  },
+  async reloadGroup(s, m) {
+    const open = s.nodes.filter((n) => n.groupId === m.groupId && n.tabId != null);
+    await Promise.all(open.map((n) => chrome.tabs.reload(n.tabId).catch(() => {})));
+  },
   async restoreGroup(s, m) {
     for (const n of s.nodes.filter((x) => x.groupId === m.groupId && x.tabId == null)) await openNode(n, false);
   },

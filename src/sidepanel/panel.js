@@ -213,6 +213,11 @@ function groupMenuItems(g) {
       },
     },
     {
+      label: 'Reload tabs',
+      disabled: !state.nodes.some((n) => n.groupId === g.id && n.tabId != null),
+      onClick: () => send({ cmd: 'reloadGroup', groupId: g.id }),
+    },
+    {
       label: 'Move',
       submenu: [
         { label: 'To top', disabled: first, onClick: moveBefore(gs[0].id) },
@@ -376,16 +381,7 @@ function renderGroup(g, all, shown, searching) {
       input.select();
     }, 0);
   } else {
-    const name = el('span', 'gname', g.name);
-    if (g.id !== INBOX) {
-      name.title = 'Double-click to rename';
-      name.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        editing = g.id;
-        render();
-      });
-    }
-    head.append(name);
+    head.append(el('span', 'gname', g.name));
   }
 
   const live = all.filter((n) => n.tabId != null).length;
@@ -399,6 +395,9 @@ function renderGroup(g, all, shown, searching) {
   head.append(actions);
 
   head.addEventListener('click', () => selectGroup(g.id));
+  head.addEventListener('dblclick', (e) => {
+    if (!e.target.closest('button, input')) send({ cmd: 'focusGroup', groupId: g.id });
+  });
   head.addEventListener('contextmenu', (e) => {
     selectGroup(g.id);
     showMenu(e, groupMenuItems(g));
