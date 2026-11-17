@@ -198,6 +198,13 @@ function groupMenuItems(g) {
   const moveBefore = (beforeId) => () => send({ cmd: 'moveGroup', groupId: g.id, beforeId });
   return [
     {
+      label: 'Rename',
+      onClick: () => {
+        editing = g.id;
+        render();
+      },
+    },
+    {
       label: 'Move',
       submenu: [
         { label: 'To top', disabled: first, onClick: moveBefore(gs[0].id) },
