@@ -11,6 +11,12 @@
   },
   "permissions": ["tabs", "storage", "unlimitedStorage", "favicon"],
   "background": { "service_worker": "src/background/background.js" },
+  "commands": {
+    "search-tabs": {
+      "suggested_key": { "mac": "Alt+Shift+A", "default": "Alt+Shift+S" },
+      "description": "Open Tabolith and search tabs"
+    }
+  },
   "action": {
     "default_title": "Open Tabolith window",
     "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" }

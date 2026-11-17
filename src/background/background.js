@@ -11,15 +11,17 @@ async function findPanelWindow() {
   return wins.find((w) => w.tabs?.some((t) => (t.url || t.pendingUrl || '').startsWith(PANEL_URL)));
 }
 
-async function openPanelWindow() {
+// Opens the panel window (or raises it). With `search`, the search box ends up focused.
+async function openPanelWindow({ search = false } = {}) {
   const existing = await findPanelWindow();
   if (existing) {
     await chrome.windows.update(existing.id, { focused: true, drawAttention: true });
+    if (search) await chrome.runtime.sendMessage({ type: 'focusSearch' }).catch(() => {});
     return;
   }
   const { panelBounds } = await chrome.storage.local.get('panelBounds');
   await chrome.windows.create({
-    url: PANEL_URL,
+    url: PANEL_URL + (search ? '#search' : ''),
     type: 'popup',
     width: 360,
     height: 800,
@@ -28,6 +30,9 @@ async function openPanelWindow() {
 }
 
 chrome.action.onClicked.addListener(() => openPanelWindow().catch((e) => console.error(e)));
+chrome.commands.onCommand.addListener((command) => {
+  if (command === 'search-tabs') openPanelWindow({ search: true }).catch((e) => console.error(e));
+});
 
 // Remember where the user put the window.
 chrome.windows.onBoundsChanged?.addListener(async (w) => {

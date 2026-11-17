@@ -551,6 +551,25 @@ document.getElementById('add-group').addEventListener('click', async () => {
   }
 });
 
+// Show the shortcut as it is currently bound (it can be changed at chrome://extensions/shortcuts).
+async function updateSearchHint() {
+  const cmd = (await chrome.commands.getAll()).find((c) => c.name === 'search-tabs');
+  document.getElementById('search').placeholder = cmd?.shortcut ? `Search tabs… (${cmd.shortcut})` : 'Search tabs…';
+}
+updateSearchHint();
+window.addEventListener('focus', updateSearchHint); // picks up a rebind made in another tab
+
+function focusSearch() {
+  const box = document.getElementById('search');
+  box.focus();
+  box.select();
+}
+// Sent by the background when the keyboard shortcut raises an already-open panel.
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.type === 'focusSearch') focusSearch();
+});
+if (location.hash === '#search') focusSearch(); // the shortcut opened a fresh panel
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.state?.newValue) {
     state = changes.state.newValue;
