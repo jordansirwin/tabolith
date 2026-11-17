@@ -8,12 +8,15 @@ monolith of tabs, neatly stacked into groups you name yourself.
 
 ## What it does
 
-- 🪜 **Vertical outline.** Your tabs, stacked like a proper tower instead of shrinking into tiny slivers.
-- 🗂️ **Groups.** Collect tabs into groups, rename them (double-click, or right-click → Rename), and tint them with a color.
-- 🧲 **Drag and drop.** Pick up tabs or whole groups and drop them where they belong.
-- 🖱️ **Multi-select.** Cmd/Ctrl-click to grab a bunch, Shift-click to grab a stretch, then move them all at once from the right-click menu.
-- 💤 **Saved tabs.** Close a tab (or a whole group) and it stays in the outline as a "saved" entry. Chrome can restart; Tabolith remembers.
-- ↺ **Reopen on demand.** Wake a single tab with a double-click, or revive an entire group in one go.
+- 🪜 **Vertical outline.** Your tabs, stacked like a proper tower instead of shrinking into tiny slivers. Open it from the toolbar icon; it lives in its own small window.
+- 🗂️ **Groups.** Collect tabs into groups, tint each one with a color (click its dot), collapse them, and rename them from the right-click menu. New tabs start in **Unorganized Mess**, the default group that can't be renamed or deleted.
+- 🧲 **Drag and drop.** Pick up tabs or whole groups and drop them where they belong, or use the right-click menus to move them.
+- 🖱️ **Multi-select.** Cmd/Ctrl-click to grab a bunch, Shift-click to grab a stretch, then move or close them all at once from the right-click menu.
+- 🔁 **Put it back.** Close a tab and reopen it (say, with Cmd/Ctrl+Shift+T) within 10 minutes, and it returns to its old group and spot.
+- 💤 **Saved tabs.** Close a whole group with ⏏, close a browser window, or quit Chrome, and the tabs stay in the outline as "saved" entries. Closing a single tab removes it, so the tower doesn't fill up with ghosts.
+- ↺ **Reopen on demand.** Wake a saved tab with a double-click, or revive an entire group in one go.
+- 🔄 **Reload a group.** Right-click a group → Reload tabs refreshes every open tab in it.
+- 🔭 **Find a group.** Double-click a group header to jump to the browser window holding its tabs.
 - 🔎 **Search.** Find that recipe from March by title, URL, or group name.
 
 ## Install (dev edition)
