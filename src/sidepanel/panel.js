@@ -206,6 +206,7 @@ function groupMenuItems(g) {
   return [
     {
       label: 'Rename',
+      disabled: g.id === INBOX,
       onClick: () => {
         editing = g.id;
         render();
@@ -376,12 +377,14 @@ function renderGroup(g, all, shown, searching) {
     }, 0);
   } else {
     const name = el('span', 'gname', g.name);
-    name.title = 'Double-click to rename';
-    name.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      editing = g.id;
-      render();
-    });
+    if (g.id !== INBOX) {
+      name.title = 'Double-click to rename';
+      name.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        editing = g.id;
+        render();
+      });
+    }
     head.append(name);
   }
 
@@ -392,7 +395,7 @@ function renderGroup(g, all, shown, searching) {
   actions.append(iconButton('+', 'New tab in this group', () => send({ cmd: 'newTab', groupId: g.id })));
   if (live) actions.append(iconButton('⏏', 'Close open tabs (keep them saved)', () => send({ cmd: 'closeGroup', groupId: g.id })));
   if (live < all.length) actions.append(iconButton('↺', 'Reopen saved tabs', () => send({ cmd: 'restoreGroup', groupId: g.id })));
-  if (g.id !== INBOX) actions.append(iconButton('×', 'Delete group (tabs move to Inbox)', () => send({ cmd: 'deleteGroup', groupId: g.id })));
+  if (g.id !== INBOX) actions.append(iconButton('×', 'Delete group (tabs move to Unorganized Mess)', () => send({ cmd: 'deleteGroup', groupId: g.id })));
   head.append(actions);
 
   head.addEventListener('click', () => selectGroup(g.id));

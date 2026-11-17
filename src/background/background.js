@@ -42,16 +42,21 @@ async function targetWindowId() {
 }
 
 const INBOX = 'inbox';
+const INBOX_NAME = 'Unorganized Mess';
 
 // ---------- state ----------
 async function load() {
   const { state } = await chrome.storage.local.get('state');
-  return (
-    state || {
-      groups: [{ id: INBOX, name: 'Inbox', collapsed: false, color: 0 }],
-      nodes: [],
-    }
-  );
+  if (state) {
+    // The default group's name is fixed (it can't be renamed).
+    const inbox = state.groups.find((g) => g.id === INBOX);
+    if (inbox) inbox.name = INBOX_NAME;
+    return state;
+  }
+  return {
+    groups: [{ id: INBOX, name: INBOX_NAME, collapsed: false, color: 0 }],
+    nodes: [],
+  };
 }
 const save = (s) => chrome.storage.local.set({ state: s });
 
