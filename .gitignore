@@ -1,0 +1,36 @@
+# extension packaging output
+/build/
+/dist/
+*.zip
+*.crx
+*.pem
+
+# dependencies and tooling (if added later)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.eslintcache
+
+# logs
+*.log
+
+# editor and OS files
+.idea
+.vscode
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# secrets and local config: never commit these
+.env
+.env.*
+*.env
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+token
+*.token
