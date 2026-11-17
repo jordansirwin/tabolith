@@ -268,6 +268,10 @@ function groupMenuItems(g) {
 function settingsMenuItems() {
   return [
     {
+      label: 'Arrange groups into windows',
+      onClick: () => send({ cmd: 'arrangeWindows' }),
+    },
+    {
       label: 'Font size',
       subClass: 'ctx-compact',
       submenu: FONT_SIZES.map((px) => ({
