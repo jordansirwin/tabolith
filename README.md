@@ -15,3 +15,7 @@ icons/                    toolbar/extension icons
 src/background/           service worker: owns the tree model + persistence
 src/sidepanel/            panel UI (html/css/js), renders state and sends commands
 ```
+
+## License
+
+[MIT](LICENSE)
