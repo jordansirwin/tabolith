@@ -17,11 +17,11 @@ let visibleOrder = []; // node ids in rendered order
 const send = (msg) =>
   chrome.runtime.sendMessage(msg).then(
     (r) => {
-      if (r?.error) console.error('Uber Tabs:', msg.cmd, r.error);
+      if (r?.error) console.error('Tabolith:', msg.cmd, r.error);
       return r;
     },
     (err) => {
-      console.error('Uber Tabs:', msg.cmd, 'failed:', err?.message || err);
+      console.error('Tabolith:', msg.cmd, 'failed:', err?.message || err);
     }
   );
 const favicon = (url) => `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&size=32`;

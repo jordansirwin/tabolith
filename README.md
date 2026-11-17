@@ -1,4 +1,4 @@
-# Uber Tabs
+# Tabolith
 
 Chrome (MV3) extension with its own standalone window: vertical tab outline with groups, drag and drop,
 and persistence across restarts (closed tabs stay as "saved" entries).
@@ -6,7 +6,7 @@ and persistence across restarts (closed tabs stay as "saved" entries).
 ## Install (dev)
 1. Open `chrome://extensions` and enable Developer mode.
 2. Load unpacked → select this folder.
-3. Click the toolbar icon to open the Uber Tabs window.
+3. Click the toolbar icon to open the Tabolith window.
 
 ## Layout
 ```

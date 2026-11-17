@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Uber Tabs",
+  "name": "Tabolith",
   "version": "0.0.4",
   "description": "Vertical tab outliner: group tabs, drag and drop between groups, and keep everything across Chrome restarts.",
   "icons": {
@@ -12,7 +12,7 @@
   "permissions": ["tabs", "storage", "unlimitedStorage", "favicon"],
   "background": { "service_worker": "src/background/background.js" },
   "action": {
-    "default_title": "Open Uber Tabs window",
+    "default_title": "Open Tabolith window",
     "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" }
   }
 }

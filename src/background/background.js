@@ -1,4 +1,4 @@
-// Uber Tabs service worker.
+// Tabolith service worker.
 // Owns the tree model (groups + nodes) and persists it in chrome.storage.local.
 // A node is a "live" tab when node.tabId != null, otherwise a "saved" tab that
 // survives tab close / Chrome shutdown and can be reopened from the panel.
