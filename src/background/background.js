@@ -87,11 +87,15 @@ const tabUrl = (t) => t.url || t.pendingUrl || '';
 // Closing a tab drops it from the outline. Remember where it was so that
 // reopening the same URL (e.g. Cmd+Shift+T) puts it back in place.
 const CLOSED_LIMIT = 50;
+const CLOSED_TTL_MS = 10 * 60 * 1000; // only restore position for tabs reopened within 10 minutes
 
 function rememberClosed(s, n) {
   const sameGroup = s.nodes.filter((x) => x.groupId === n.groupId);
   const i = sameGroup.indexOf(n);
-  (s.closed ||= []).unshift({
+  const now = Date.now();
+  s.closed = (s.closed || []).filter((c) => now - c.closedAt < CLOSED_TTL_MS);
+  s.closed.unshift({
+    closedAt: now,
     url: n.url,
     groupId: n.groupId,
     prevId: sameGroup[i - 1]?.id ?? null,
@@ -108,7 +112,10 @@ function removeNode(s, n) {
 
 // If `url` was recently closed, insert `n` where it used to be. Returns whether it did.
 function restoreClosed(s, n, url) {
-  const ci = (s.closed || []).findIndex((c) => c.url === url && s.groups.some((g) => g.id === c.groupId));
+  const now = Date.now();
+  const ci = (s.closed || []).findIndex(
+    (c) => c.url === url && now - c.closedAt < CLOSED_TTL_MS && s.groups.some((g) => g.id === c.groupId)
+  );
   if (ci < 0) return false;
   const [rec] = s.closed.splice(ci, 1);
   n.groupId = rec.groupId;

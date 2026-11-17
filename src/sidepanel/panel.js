@@ -366,7 +366,8 @@ function renderGroup(g, all, shown, searching) {
       if (done) return;
       done = true;
       editing = null;
-      if (commit && input.value.trim()) send({ cmd: 'renameGroup', groupId: g.id, name: input.value });
+      // Re-render once the rename lands (storage may not change if the name is unchanged).
+      if (commit && input.value.trim()) send({ cmd: 'renameGroup', groupId: g.id, name: input.value }).then(render);
       else render();
     };
     input.addEventListener('click', (e) => e.stopPropagation());
@@ -446,7 +447,8 @@ function renderGroup(g, all, shown, searching) {
 }
 
 function render() {
-  if (dragging) {
+  // Don't rebuild the tree under an open rename box or an in-progress drag.
+  if (dragging || (editing && tree.querySelector('.gname-input'))) {
     pendingRender = true;
     return;
   }
