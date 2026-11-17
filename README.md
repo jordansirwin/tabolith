@@ -1,12 +1,12 @@
 # Uber Tabs
 
-Chrome (MV3) side-panel extension: vertical tab outline with groups, drag and drop,
+Chrome (MV3) extension with its own standalone window: vertical tab outline with groups, drag and drop,
 and persistence across restarts (closed tabs stay as "saved" entries).
 
 ## Install (dev)
 1. Open `chrome://extensions` and enable Developer mode.
 2. Load unpacked → select this folder.
-3. Click the toolbar icon to open the side panel.
+3. Click the toolbar icon to open the Uber Tabs window.
 
 ## Layout
 ```

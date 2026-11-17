@@ -241,9 +241,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
+// This UI runs in its own popup window, so "current window" is the panel itself.
+// Track the active tab of the focused (or most recent) normal browser window.
 async function refreshActive() {
-  const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
-  activeTabId = t?.id ?? null;
+  const wins = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] });
+  const w = wins.find((x) => x.focused) || wins.find((x) => x.tabs?.some((t) => t.id === activeTabId)) || wins[0];
+  activeTabId = w?.tabs?.find((t) => t.active)?.id ?? null;
   render();
 }
 chrome.tabs.onActivated.addListener(refreshActive);

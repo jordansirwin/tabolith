@@ -3,7 +3,43 @@
 // A node is a "live" tab when node.tabId != null, otherwise a "saved" tab that
 // survives tab close / Chrome shutdown and can be reopened from the panel.
 
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+// The UI lives in its own standalone popup-type window (not Chrome's side panel).
+const PANEL_URL = chrome.runtime.getURL('src/sidepanel/panel.html');
+
+async function findPanelWindow() {
+  const wins = await chrome.windows.getAll({ populate: true, windowTypes: ['popup'] });
+  return wins.find((w) => w.tabs?.some((t) => (t.url || t.pendingUrl || '').startsWith(PANEL_URL)));
+}
+
+async function openPanelWindow() {
+  const existing = await findPanelWindow();
+  if (existing) {
+    await chrome.windows.update(existing.id, { focused: true, drawAttention: true });
+    return;
+  }
+  const { panelBounds } = await chrome.storage.local.get('panelBounds');
+  await chrome.windows.create({
+    url: PANEL_URL,
+    type: 'popup',
+    width: 360,
+    height: 800,
+    ...(panelBounds || {}),
+  });
+}
+
+chrome.action.onClicked.addListener(() => openPanelWindow().catch((e) => console.error(e)));
+
+// Remember where the user put the window.
+chrome.windows.onBoundsChanged?.addListener(async (w) => {
+  if (w.type !== 'popup' || !(await findPanelWindow().then((p) => p?.id === w.id))) return;
+  chrome.storage.local.set({ panelBounds: { left: w.left, top: w.top, width: w.width, height: w.height } });
+});
+
+// Tabs should open in a normal browser window, never inside the panel window.
+async function targetWindowId() {
+  const wins = await chrome.windows.getAll({ windowTypes: ['normal'] });
+  return (wins.find((w) => w.focused) || wins[wins.length - 1])?.id;
+}
 
 const INBOX = 'inbox';
 
@@ -35,6 +71,7 @@ function run(fn) {
 const uid = () => crypto.randomUUID();
 const isBlank = (u) =>
   !u ||
+  u.startsWith(PANEL_URL) ||
   u === 'about:blank' ||
   u.startsWith('chrome://newtab') ||
   u.startsWith('chrome://new-tab-page') ||
@@ -134,7 +171,7 @@ async function openNode(n, active) {
       n.tabId = null;
     }
   }
-  const t = await chrome.tabs.create({ url: n.url, active });
+  const t = await chrome.tabs.create({ url: n.url, active, windowId: await targetWindowId() });
   n.tabId = t.id;
   n.windowId = t.windowId;
 }
@@ -187,7 +224,7 @@ const commands = {
     for (const n of s.nodes.filter((x) => x.groupId === m.groupId && x.tabId == null)) await openNode(n, false);
   },
   async newTab(s, m) {
-    const t = await chrome.tabs.create({ active: true });
+    const t = await chrome.tabs.create({ active: true, windowId: await targetWindowId() });
     // Blank tabs aren't listed until they navigate; remember the target group.
     s.pendingGroup = { tabId: t.id, groupId: m.groupId };
   },
