@@ -9,7 +9,7 @@ monolith of tabs, neatly stacked into groups you name yourself.
 ## What it does
 
 - 🪜 **Vertical outline.** Your tabs, stacked like a proper tower instead of shrinking into tiny slivers. Open it from the toolbar icon; it lives in its own small window.
-- 🗂️ **Groups.** Collect tabs into groups, tint each one with a color (click its dot), collapse them, and rename them from the right-click menu. New tabs start in **Unorganized Mess**, the default group that can't be renamed or deleted.
+- 🗂️ **Groups.** Collect tabs into groups, tint each one with any of 25 colors (right-click → Color; the dot and header highlight change together), collapse them, and rename them from the right-click menu. New tabs start in **Unorganized Mess**, the default group that can't be renamed or deleted.
 - 🧲 **Drag and drop.** Pick up tabs or whole groups and drop them where they belong, or use the right-click menus to move them.
 - 🖱️ **Multi-select.** Cmd/Ctrl-click to grab a bunch, Shift-click to grab a stretch, then move or close them all at once from the right-click menu.
 - 🔁 **Put it back.** Close a tab and reopen it (say, with Cmd/Ctrl+Shift+T) within 10 minutes, and it returns to its old group and spot.

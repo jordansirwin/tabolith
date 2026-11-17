@@ -1,5 +1,14 @@
 const INBOX = 'inbox';
-const COLORS = ['#8b949e', '#e5534b', '#e0823d', '#c9a227', '#57ab5a', '#39a9c7', '#6d8cf5', '#b083f0', '#e275ad'];
+const COLORS = [
+  '#8b949e', '#e5534b', '#e0823d', '#c9a227', '#57ab5a', '#39a9c7', '#6d8cf5', '#b083f0', '#e275ad',
+  '#1fa89a', '#8cc63f', '#f2a900', '#a0724a', '#ff7f6e', '#d6409f', '#4b52c9', '#5bb8f5', '#6b7b8c', '#6fd6a3',
+  '#a63d40', '#8a8f3a', '#2f7d4f', '#2f5fa8', '#b9a6f0', '#f4b183',
+];
+const COLOR_NAMES = [
+  'Gray', 'Red', 'Orange', 'Yellow', 'Green', 'Cyan', 'Blue', 'Purple', 'Pink',
+  'Teal', 'Lime', 'Amber', 'Brown', 'Coral', 'Magenta', 'Indigo', 'Sky', 'Slate', 'Mint',
+  'Maroon', 'Olive', 'Forest', 'Navy', 'Lavender', 'Peach',
+];
 
 const tree = document.getElementById('tree');
 let state = { groups: [], nodes: [] };
@@ -93,7 +102,7 @@ function closeMenu() {
   menu?.remove();
   menu = null;
 }
-// items: [{ label, onClick, disabled, dot, submenu: [...items] } | '-']
+// items: [{ label, onClick, disabled, dot, submenu: [...items], subClass } | '-']
 function buildMenu(container, items) {
   for (const it of items) {
     if (it === '-') {
@@ -103,7 +112,7 @@ function buildMenu(container, items) {
     const row = el('div', 'ctx-item' + (it.disabled ? ' disabled' : ''));
     if (it.dot) row.append(it.dot);
     row.append(el('span', it.submenu ? 'grow' : null, it.label));
-    if (it.submenu) addSubmenu(row, it.submenu);
+    if (it.submenu) addSubmenu(row, it.submenu, it.subClass);
     else if (!it.disabled) {
       row.addEventListener('click', () => {
         closeMenu();
@@ -114,10 +123,10 @@ function buildMenu(container, items) {
   }
 }
 
-function addSubmenu(parent, items) {
+function addSubmenu(parent, items, subClass) {
   parent.classList.add('has-sub');
   parent.append(el('span', 'ctx-arrow', '▸'));
-  const sub = el('div', 'ctx ctx-sub');
+  const sub = el('div', 'ctx ctx-sub' + (subClass ? ' ' + subClass : ''));
   buildMenu(sub, items);
   parent.append(sub);
 
@@ -211,6 +220,16 @@ function groupMenuItems(g) {
         editing = g.id;
         render();
       },
+    },
+    {
+      label: 'Color',
+      subClass: 'ctx-compact',
+      submenu: COLORS.map((_, i) => ({
+        label: COLOR_NAMES[i],
+        dot: groupDot({ color: i }),
+        disabled: (g.color || 0) % COLORS.length === i,
+        onClick: () => send({ cmd: 'setGroupColor', groupId: g.id, color: i }),
+      })),
     },
     {
       label: 'Reload tabs',
@@ -350,13 +369,7 @@ function renderGroup(g, all, shown, searching) {
   head.append(iconButton(collapsed ? '▸' : '▾', collapsed ? 'Expand' : 'Collapse', () => send({ cmd: 'toggleGroup', groupId: g.id })));
   head.lastChild.className = 'chev';
 
-  const dot = groupDot(g);
-  dot.title = 'Change color';
-  dot.addEventListener('click', (e) => {
-    e.stopPropagation();
-    send({ cmd: 'recolorGroup', groupId: g.id });
-  });
-  head.append(dot);
+  head.append(groupDot(g));
 
   if (editing === g.id) {
     const input = el('input', 'gname-input');

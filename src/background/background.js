@@ -281,9 +281,9 @@ const commands = {
     const g = s.groups.find((x) => x.id === m.groupId);
     if (g) g.collapsed = !g.collapsed;
   },
-  recolorGroup(s, m) {
+  setGroupColor(s, m) {
     const g = s.groups.find((x) => x.id === m.groupId);
-    if (g) g.color = ((g.color || 0) + 1) % 9;
+    if (g && Number.isInteger(m.color) && m.color >= 0) g.color = m.color;
   },
   deleteGroup(s, m) {
     if (m.groupId === INBOX) return;
