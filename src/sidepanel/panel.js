@@ -257,11 +257,11 @@ function renderNode(n, g, siblings) {
   row.append(img, el('span', 'title', n.title || n.url));
 
   const x = el('button', 'x', '×');
-  x.title = live ? 'Close tab (keeps it saved here). Alt-click to remove entirely.' : 'Remove from outline';
+  x.title = live ? 'Close tab and remove it from the outline' : 'Remove from outline';
   x.addEventListener('dblclick', (e) => e.stopPropagation());
   x.addEventListener('click', (e) => {
     e.stopPropagation();
-    send({ cmd: live && !e.altKey ? 'closeTab' : 'deleteNode', nodeId: n.id });
+    send({ cmd: 'deleteNode', nodeId: n.id });
   });
   row.append(x);
 

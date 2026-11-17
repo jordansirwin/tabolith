@@ -194,10 +194,6 @@ const commands = {
     return { state: s };
   },
   open: (s, m) => openNode(s.nodes.find((n) => n.id === m.nodeId), true),
-  async closeTab(s, m) {
-    const n = s.nodes.find((x) => x.id === m.nodeId);
-    if (n?.tabId != null) await closeTabs([n.tabId]);
-  },
   async deleteNode(s, m) {
     const i = s.nodes.findIndex((x) => x.id === m.nodeId);
     if (i < 0) return;
@@ -228,8 +224,12 @@ const commands = {
     for (const n of s.nodes) if (n.groupId === m.groupId) n.groupId = INBOX;
     s.groups = s.groups.filter((g) => g.id !== m.groupId);
   },
+  // Explicit "close but keep saved": demote first so onRemoved doesn't delete the nodes.
   async closeGroup(s, m) {
-    await closeTabs(s.nodes.filter((n) => n.groupId === m.groupId && n.tabId != null).map((n) => n.tabId));
+    const open = s.nodes.filter((n) => n.groupId === m.groupId && n.tabId != null);
+    const ids = open.map((n) => n.tabId);
+    for (const n of open) n.tabId = null;
+    await closeTabs(ids);
   },
   async restoreGroup(s, m) {
     for (const n of s.nodes.filter((x) => x.groupId === m.groupId && x.tabId == null)) await openNode(n, false);
@@ -275,10 +275,15 @@ chrome.tabs.onUpdated.addListener((id, change, t) =>
   })
 );
 
-chrome.tabs.onRemoved.addListener((id) =>
+// Closing a tab removes it from the outline. When its whole window is closing
+// (e.g. Chrome quitting) keep it as a saved entry so it survives a restart.
+chrome.tabs.onRemoved.addListener((id, info) =>
   run((s) => {
-    const n = s.nodes.find((x) => x.tabId === id);
-    if (n) n.tabId = null;
+    const i = s.nodes.findIndex((x) => x.tabId === id);
+    if (i >= 0) {
+      if (info.isWindowClosing) s.nodes[i].tabId = null;
+      else s.nodes.splice(i, 1);
+    }
     if (s.pendingGroup?.tabId === id) delete s.pendingGroup;
   })
 );
