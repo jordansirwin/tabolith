@@ -10,6 +10,14 @@ const COLOR_NAMES = [
   'Maroon', 'Olive', 'Forest', 'Navy', 'Lavender', 'Peach',
 ];
 
+const FONT_SIZES = [8, 9, 10, 11, 12, 13, 14];
+const DEFAULT_FONT_SIZE = 12;
+let fontSize = DEFAULT_FONT_SIZE;
+function applyFontSize(px) {
+  fontSize = FONT_SIZES.includes(px) ? px : DEFAULT_FONT_SIZE;
+  document.documentElement.style.setProperty('--font-size', fontSize + 'px');
+}
+
 const tree = document.getElementById('tree');
 let state = { groups: [], nodes: [] };
 let activeTabId = null;
@@ -244,6 +252,21 @@ function groupMenuItems(g) {
         { label: 'Up', disabled: first, onClick: moveBefore(gs[i - 1]?.id) },
         { label: 'Down', disabled: last, onClick: moveBefore(gs[i + 2]?.id ?? null) },
       ],
+    },
+  ];
+}
+function settingsMenuItems() {
+  return [
+    {
+      label: 'Font size',
+      subClass: 'ctx-compact',
+      submenu: FONT_SIZES.map((px) => ({
+        label: `${px}px${px === fontSize ? ' ✓' : ''}`,
+        onClick: () => {
+          applyFontSize(px);
+          chrome.storage.local.set({ fontSize: px });
+        },
+      })),
     },
   ];
 }
@@ -487,6 +510,11 @@ document.getElementById('search').addEventListener('input', (e) => {
   filter = e.target.value;
   render();
 });
+document.getElementById('settings').addEventListener('click', (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  // Anchor the menu under the button, right-aligned with it.
+  showMenu({ preventDefault() {}, stopPropagation: () => e.stopPropagation(), clientX: r.right - 120, clientY: r.bottom + 2 }, settingsMenuItems());
+});
 document.getElementById('add-group').addEventListener('click', async () => {
   const r = await send({ cmd: 'addGroup', name: 'New group' });
   if (r?.id) {
@@ -514,6 +542,8 @@ chrome.tabs.onActivated.addListener(refreshActive);
 chrome.windows.onFocusChanged.addListener(refreshActive);
 
 (async () => {
+  const { fontSize: saved } = await chrome.storage.local.get('fontSize');
+  applyFontSize(saved);
   const r = await send({ cmd: 'sync' });
   if (r?.state) state = r.state;
   await refreshActive();
