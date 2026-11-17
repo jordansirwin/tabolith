@@ -51,6 +51,7 @@ async function load() {
     // The default group's name is fixed (it can't be renamed).
     const inbox = state.groups.find((g) => g.id === INBOX);
     if (inbox) inbox.name = INBOX_NAME;
+    state.nodes = state.nodes.filter((n) => !n.url?.startsWith(PANEL_URL)); // the panel never belongs in its own outline
     return state;
   }
   return {
@@ -300,12 +301,16 @@ const commands = {
     for (const n of open) n.tabId = null;
     await closeTabs(ids);
   },
-  // Bring the browser window holding this group's tabs to the front (any browser window if none are open).
+  // Bring the browser window holding this group's tabs to the front.
+  // With no real tab to show, do nothing: raising an unrelated window would bury the panel.
   async focusGroup(s, m) {
-    const live = s.nodes.find((n) => n.groupId === m.groupId && n.tabId != null);
-    const tab = live && (await chrome.tabs.get(live.tabId).catch(() => null));
-    const windowId = tab?.windowId ?? (await targetWindowId());
-    if (windowId != null) await chrome.windows.update(windowId, { focused: true });
+    for (const n of s.nodes) {
+      if (n.groupId !== m.groupId || n.tabId == null) continue;
+      const tab = await chrome.tabs.get(n.tabId).catch(() => null);
+      if (!tab || tabUrl(tab).startsWith(PANEL_URL)) continue;
+      await chrome.windows.update(tab.windowId, { focused: true });
+      return;
+    }
   },
   async reloadGroup(s, m) {
     const open = s.nodes.filter((n) => n.groupId === m.groupId && n.tabId != null);

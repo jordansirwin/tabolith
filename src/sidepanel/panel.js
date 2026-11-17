@@ -11,12 +11,17 @@ const COLOR_NAMES = [
 ];
 
 const FONT_SIZES = [8, 9, 10, 11, 12, 13, 14];
-const DEFAULT_FONT_SIZE = 12;
+// The default lives in panel.css (:root --font-size); read it before any override is applied.
+const DEFAULT_FONT_SIZE = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--font-size'), 10) || 12;
 let fontSize = DEFAULT_FONT_SIZE;
 function applyFontSize(px) {
   fontSize = FONT_SIZES.includes(px) ? px : DEFAULT_FONT_SIZE;
   document.documentElement.style.setProperty('--font-size', fontSize + 'px');
 }
+// Per-window UI preference: localStorage is synchronous, so the saved size applies before first paint.
+try {
+  applyFontSize(Number(localStorage.getItem('fontSize')));
+} catch {}
 
 const tree = document.getElementById('tree');
 let state = { groups: [], nodes: [] };
@@ -162,18 +167,23 @@ function addSubmenu(parent, items, subClass) {
   });
 }
 
+// Context-menu entry point for mouse events.
 function showMenu(e, items) {
   e.preventDefault();
   // Don't let the document-level handler below immediately close the new menu.
   e.stopPropagation();
+  openMenuAt(e.clientX, e.clientY, items);
+}
+
+function openMenuAt(x, y, items) {
   closeMenu();
   menu = el('div', 'ctx');
   buildMenu(menu, items);
   document.body.append(menu);
   // Keep the menu inside the window.
   const r = menu.getBoundingClientRect();
-  menu.style.left = Math.max(0, Math.min(e.clientX, innerWidth - r.width)) + 'px';
-  menu.style.top = Math.max(0, Math.min(e.clientY, innerHeight - r.height)) + 'px';
+  menu.style.left = Math.max(0, Math.min(x, innerWidth - r.width)) + 'px';
+  menu.style.top = Math.max(0, Math.min(y, innerHeight - r.height)) + 'px';
 }
 
 function nodeMenuItems(n) {
@@ -264,7 +274,9 @@ function settingsMenuItems() {
         label: `${px}px${px === fontSize ? ' ✓' : ''}`,
         onClick: () => {
           applyFontSize(px);
-          chrome.storage.local.set({ fontSize: px });
+          try {
+            localStorage.setItem('fontSize', px);
+          } catch {}
         },
       })),
     },
@@ -489,6 +501,7 @@ function updateToggleAll() {
   const collapse = anyExpanded();
   toggleAll.textContent = collapse ? '⊟' : '⊞';
   toggleAll.title = collapse ? 'Collapse all groups' : 'Expand all groups';
+  toggleAll.setAttribute('aria-label', toggleAll.title);
 }
 toggleAll.addEventListener('click', () => send({ cmd: 'setAllCollapsed', collapsed: anyExpanded() }));
 
@@ -522,9 +535,9 @@ document.getElementById('search').addEventListener('input', (e) => {
   render();
 });
 document.getElementById('settings').addEventListener('click', (e) => {
+  e.stopPropagation(); // keep the document-level click handler from closing the new menu
   const r = e.currentTarget.getBoundingClientRect();
-  // Anchor the menu under the button, right-aligned with it.
-  showMenu({ preventDefault() {}, stopPropagation: () => e.stopPropagation(), clientX: r.right - 120, clientY: r.bottom + 2 }, settingsMenuItems());
+  openMenuAt(r.right - 120, r.bottom + 2, settingsMenuItems()); // under the button, mostly right-aligned
 });
 document.getElementById('add-group').addEventListener('click', async () => {
   const r = await send({ cmd: 'addGroup', name: 'New group' });
@@ -553,8 +566,6 @@ chrome.tabs.onActivated.addListener(refreshActive);
 chrome.windows.onFocusChanged.addListener(refreshActive);
 
 (async () => {
-  const { fontSize: saved } = await chrome.storage.local.get('fontSize');
-  applyFontSize(saved);
   const r = await send({ cmd: 'sync' });
   if (r?.state) state = r.state;
   await refreshActive();
