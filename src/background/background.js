@@ -281,6 +281,9 @@ const commands = {
     const g = s.groups.find((x) => x.id === m.groupId);
     if (g) g.collapsed = !g.collapsed;
   },
+  setAllCollapsed(s, m) {
+    for (const g of s.groups) g.collapsed = !!m.collapsed;
+  },
   setGroupColor(s, m) {
     const g = s.groups.find((x) => x.id === m.groupId);
     if (g && Number.isInteger(m.color) && m.color >= 0) g.color = m.color;

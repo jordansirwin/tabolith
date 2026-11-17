@@ -482,6 +482,16 @@ function renderGroup(g, all, shown, searching) {
   return sec;
 }
 
+// One button: collapses everything if any group is open, otherwise expands everything.
+const toggleAll = document.getElementById('toggle-all');
+const anyExpanded = () => state.groups.some((g) => !g.collapsed);
+function updateToggleAll() {
+  const collapse = anyExpanded();
+  toggleAll.textContent = collapse ? '⊟' : '⊞';
+  toggleAll.title = collapse ? 'Collapse all groups' : 'Expand all groups';
+}
+toggleAll.addEventListener('click', () => send({ cmd: 'setAllCollapsed', collapsed: anyExpanded() }));
+
 function render() {
   // Don't rebuild the tree under an open rename box or an in-progress drag.
   if (dragging || (editing && tree.querySelector('.gname-input'))) {
@@ -494,6 +504,7 @@ function render() {
     for (const id of [...selected]) if (!ids.has(id)) selected.delete(id);
   }
   if (selectedGroup && !state.groups.some((g) => g.id === selectedGroup)) selectedGroup = null;
+  updateToggleAll();
   visibleOrder = [];
   tree.textContent = '';
   for (const g of state.groups) {
