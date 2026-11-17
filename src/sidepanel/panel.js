@@ -9,6 +9,7 @@ let pendingRender = false;
 let editing = null; // group id being renamed
 let filter = '';
 const selected = new Set(); // node ids
+let selectedGroup = null; // group id
 let anchorId = null; // last plain/ctrl-clicked row, for shift-range
 let visibleOrder = []; // node ids in rendered order
 
@@ -90,42 +91,32 @@ function closeMenu() {
   menu?.remove();
   menu = null;
 }
-function showNodeMenu(e, n) {
-  e.preventDefault();
-  // Don't let the document-level handler below immediately close the new menu.
-  e.stopPropagation();
-  closeMenu();
-  menu = el('div', 'ctx');
-
-  // "Move to group" opens a submenu listing every group.
-  const parent = el('div', 'ctx-item has-sub');
-  const ids = targetIds(n.id);
-  const gid = new Map(state.nodes.map((x) => [x.id, x.groupId]));
-  const fromGroups = new Set(ids.map((id) => gid.get(id)));
-  parent.append(el('span', 'grow', ids.length > 1 ? `Move ${ids.length} tabs to group` : 'Move to group'), el('span', 'ctx-arrow', '▸'));
-  const sub = el('div', 'ctx ctx-sub');
-  for (const g of state.groups) {
-    const same = fromGroups.size === 1 && fromGroups.has(g.id);
-    const item = el('div', 'ctx-item' + (same ? ' disabled' : ''));
-    item.append(groupDot(g), el('span', null, g.name));
-    if (!same) {
-      item.addEventListener('click', () => {
+// items: [{ label, onClick, disabled, dot, submenu: [...items] } | '-']
+function buildMenu(container, items) {
+  for (const it of items) {
+    if (it === '-') {
+      container.append(el('div', 'ctx-sep'));
+      continue;
+    }
+    const row = el('div', 'ctx-item' + (it.disabled ? ' disabled' : ''));
+    if (it.dot) row.append(it.dot);
+    row.append(el('span', it.submenu ? 'grow' : null, it.label));
+    if (it.submenu) addSubmenu(row, it.submenu);
+    else if (!it.disabled) {
+      row.addEventListener('click', () => {
         closeMenu();
-        send({ cmd: 'moveNodes', nodeIds: ids, groupId: g.id, beforeId: null });
+        it.onClick();
       });
     }
-    sub.append(item);
+    container.append(row);
   }
-  const add = el('div', 'ctx-item', '+ New group…');
-  add.addEventListener('click', async () => {
-    closeMenu();
-    const r = await send({ cmd: 'addGroup', name: 'New group' });
-    if (!r?.id) return;
-    await send({ cmd: 'moveNodes', nodeIds: ids, groupId: r.id, beforeId: null });
-    editing = r.id;
-    render();
-  });
-  sub.append(el('div', 'ctx-sep'), add);
+}
+
+function addSubmenu(parent, items) {
+  parent.classList.add('has-sub');
+  parent.append(el('span', 'ctx-arrow', '▸'));
+  const sub = el('div', 'ctx ctx-sub');
+  buildMenu(sub, items);
   parent.append(sub);
 
   const openSub = () => {
@@ -147,16 +138,73 @@ function showNodeMenu(e, n) {
     closeTimer = setTimeout(() => parent.classList.remove('open'), 250);
   });
   parent.addEventListener('click', (ev) => {
-    ev.stopPropagation(); // keep the menu open; tap/click toggles the submenu
+    ev.stopPropagation(); // keep the menu open; click toggles the submenu (touch)
     openSub();
   });
-  menu.append(parent);
+}
 
+function showMenu(e, items) {
+  e.preventDefault();
+  // Don't let the document-level handler below immediately close the new menu.
+  e.stopPropagation();
+  closeMenu();
+  menu = el('div', 'ctx');
+  buildMenu(menu, items);
   document.body.append(menu);
   // Keep the menu inside the window.
   const r = menu.getBoundingClientRect();
   menu.style.left = Math.max(0, Math.min(e.clientX, innerWidth - r.width)) + 'px';
   menu.style.top = Math.max(0, Math.min(e.clientY, innerHeight - r.height)) + 'px';
+}
+
+function nodeMenuItems(n) {
+  const ids = targetIds(n.id);
+  const gid = new Map(state.nodes.map((x) => [x.id, x.groupId]));
+  const fromGroups = new Set(ids.map((id) => gid.get(id)));
+  const moveTo = (groupId) => send({ cmd: 'moveNodes', nodeIds: ids, groupId, beforeId: null });
+  return [
+    {
+      label: ids.length > 1 ? `Move ${ids.length} tabs to group` : 'Move to group',
+      submenu: [
+        ...state.groups.map((g) => ({
+          label: g.name,
+          dot: groupDot(g),
+          disabled: fromGroups.size === 1 && fromGroups.has(g.id),
+          onClick: () => moveTo(g.id),
+        })),
+        '-',
+        {
+          label: '+ New group…',
+          async onClick() {
+            const r = await send({ cmd: 'addGroup', name: 'New group' });
+            if (!r?.id) return;
+            await moveTo(r.id);
+            editing = r.id;
+            render();
+          },
+        },
+      ],
+    },
+  ];
+}
+
+function groupMenuItems(g) {
+  const gs = state.groups;
+  const i = gs.findIndex((x) => x.id === g.id);
+  const first = i === 0;
+  const last = i === gs.length - 1;
+  const moveBefore = (beforeId) => () => send({ cmd: 'moveGroup', groupId: g.id, beforeId });
+  return [
+    {
+      label: 'Move',
+      submenu: [
+        { label: 'To top', disabled: first, onClick: moveBefore(gs[0].id) },
+        { label: 'To bottom', disabled: last, onClick: moveBefore(null) },
+        { label: 'Up', disabled: first, onClick: moveBefore(gs[i - 1]?.id) },
+        { label: 'Down', disabled: last, onClick: moveBefore(gs[i + 2]?.id ?? null) },
+      ],
+    },
+  ];
 }
 document.addEventListener('click', closeMenu);
 document.addEventListener('contextmenu', (e) => {
@@ -165,9 +213,10 @@ document.addEventListener('contextmenu', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (menu) closeMenu();
-  else if (selected.size && document.activeElement?.tagName !== 'INPUT') {
+  else if ((selected.size || selectedGroup) && document.activeElement?.tagName !== 'INPUT') {
     selected.clear();
-    render();
+    selectedGroup = null;
+    paintSelection();
   }
 });
 window.addEventListener('blur', closeMenu);
@@ -178,14 +227,22 @@ tree.addEventListener('scroll', closeMenu);
 const targetIds = (id) => (selected.has(id) ? [...selected] : [id]);
 
 function selectOnly(id) {
+  selectedGroup = null;
   selected.clear();
   selected.add(id);
   anchorId = id;
   paintSelection();
 }
 
+function selectGroup(id) {
+  selected.clear();
+  selectedGroup = id;
+  paintSelection();
+}
+
 function paintSelection() {
   document.querySelectorAll('.row[data-id]').forEach((r) => r.classList.toggle('selected', selected.has(r.dataset.id)));
+  document.querySelectorAll('.ghead[data-gid]').forEach((h) => h.classList.toggle('selected', h.dataset.gid === selectedGroup));
 }
 
 function renderNode(n, g, siblings) {
@@ -215,6 +272,7 @@ function renderNode(n, g, siblings) {
   // classes in place (no re-render) so the second click of a double-click
   // still lands on the same element and fires dblclick.
   row.addEventListener('click', (e) => {
+    selectedGroup = null;
     if (e.shiftKey && anchorId && visibleOrder.includes(anchorId)) {
       const a = visibleOrder.indexOf(anchorId);
       const b = visibleOrder.indexOf(n.id);
@@ -236,7 +294,7 @@ function renderNode(n, g, siblings) {
   row.addEventListener('contextmenu', (e) => {
     // Right-clicking outside the selection selects just that row.
     if (!selected.has(n.id)) selectOnly(n.id);
-    showNodeMenu(e, n);
+    showMenu(e, nodeMenuItems(n));
   });
   row.addEventListener('dragstart', (e) => startDrag(e, 'node', n.id, row));
   row.addEventListener('dragend', endDrag);
@@ -264,7 +322,10 @@ function renderGroup(g, all, shown, searching) {
 
   const head = el('div', 'ghead');
   head.draggable = editing !== g.id;
-  head.append(el('span', 'chev', collapsed ? '▸' : '▾'));
+  head.dataset.gid = g.id;
+  if (selectedGroup === g.id) head.classList.add('selected');
+  head.append(iconButton(collapsed ? '▸' : '▾', collapsed ? 'Expand' : 'Collapse', () => send({ cmd: 'toggleGroup', groupId: g.id })));
+  head.lastChild.className = 'chev';
 
   const dot = groupDot(g);
   dot.title = 'Change color';
@@ -317,7 +378,11 @@ function renderGroup(g, all, shown, searching) {
   if (g.id !== INBOX) actions.append(iconButton('×', 'Delete group (tabs move to Inbox)', () => send({ cmd: 'deleteGroup', groupId: g.id })));
   head.append(actions);
 
-  head.addEventListener('click', () => send({ cmd: 'toggleGroup', groupId: g.id }));
+  head.addEventListener('click', () => selectGroup(g.id));
+  head.addEventListener('contextmenu', (e) => {
+    selectGroup(g.id);
+    showMenu(e, groupMenuItems(g));
+  });
   head.addEventListener('dragstart', (e) => startDrag(e, 'group', g.id, head));
   head.addEventListener('dragend', endDrag);
   head.addEventListener('dragover', (e) => {
@@ -371,6 +436,7 @@ function render() {
     const ids = new Set(state.nodes.map((n) => n.id));
     for (const id of [...selected]) if (!ids.has(id)) selected.delete(id);
   }
+  if (selectedGroup && !state.groups.some((g) => g.id === selectedGroup)) selectedGroup = null;
   visibleOrder = [];
   tree.textContent = '';
   for (const g of state.groups) {

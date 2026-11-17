@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Uber Tabs",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Vertical tab outliner: group tabs, drag and drop between groups, and keep everything across Chrome restarts.",
   "icons": {
     "16": "icons/icon16.png",
