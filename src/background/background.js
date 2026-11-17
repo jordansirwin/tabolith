@@ -200,6 +200,13 @@ const commands = {
     const [n] = s.nodes.splice(i, 1);
     if (n.tabId != null) await closeTabs([n.tabId]);
   },
+  async deleteNodes(s, m) {
+    const ids = new Set(m.nodeIds);
+    const gone = s.nodes.filter((x) => ids.has(x.id));
+    s.nodes = s.nodes.filter((x) => !ids.has(x.id));
+    const tabIds = gone.filter((n) => n.tabId != null).map((n) => n.tabId);
+    if (tabIds.length) await closeTabs(tabIds);
+  },
   moveNodes: (s, m) => moveNodes(s, m.nodeIds, m.groupId, m.beforeId),
   moveGroup: (s, m) => moveGroup(s, m.groupId, m.beforeId),
   addGroup(s, m) {

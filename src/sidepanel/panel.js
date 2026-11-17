@@ -187,6 +187,13 @@ function nodeMenuItems(n) {
         },
       ],
     },
+    {
+      label: ids.length > 1 ? `Close ${ids.length} tabs` : 'Close tab',
+      onClick: () => {
+        selected.clear();
+        send({ cmd: 'deleteNodes', nodeIds: ids });
+      },
+    },
   ];
 }
 
