@@ -215,15 +215,20 @@ function moveGroup(s, groupId, beforeId) {
 }
 
 // ---------- chrome helpers ----------
-async function closeTabs(ids) {
+// By default a window never closes just because its last tab did (a blank tab is left behind).
+// `closeEmptyWindows` lets it close, except for the very last browser window.
+async function closeTabs(ids, { closeEmptyWindows = false } = {}) {
   if (!ids.length) return;
   const tabs = (await Promise.all(ids.map((id) => chrome.tabs.get(id).catch(() => null)))).filter(Boolean);
   const byWin = {};
   for (const t of tabs) (byWin[t.windowId] ||= []).push(t.id);
   // Don't let closing the last tab of a window close the window.
+  const windowCount = closeEmptyWindows ? (await chrome.windows.getAll({ windowTypes: ['normal'] })).length : 0;
   for (const [w, closing] of Object.entries(byWin)) {
     const all = await chrome.tabs.query({ windowId: +w });
-    if (all.every((t) => closing.includes(t.id))) await chrome.tabs.create({ windowId: +w, active: true });
+    if (!all.every((t) => closing.includes(t.id))) continue;
+    if (closeEmptyWindows && windowCount > 1) continue;
+    await chrome.tabs.create({ windowId: +w, active: true });
   }
   await chrome.tabs.remove(tabs.map((t) => t.id)).catch(() => {});
 }
@@ -384,13 +389,19 @@ const commands = {
     const g = s.groups.find((x) => x.id === m.groupId);
     if (g && Number.isInteger(m.color) && m.color >= 0) g.color = m.color;
   },
+  // m.tabs: 'move' (default) sends the group's tabs to the default group; 'close' closes them all.
   async deleteGroup(s, m) {
     if (m.groupId === INBOX) return;
-    const inbox = s.groups.find((g) => g.id === INBOX);
-    const moved = s.nodes.filter((n) => n.groupId === m.groupId);
-    for (const n of moved) n.groupId = INBOX;
+    const members = s.nodes.filter((n) => n.groupId === m.groupId);
     s.groups = s.groups.filter((g) => g.id !== m.groupId);
-    for (const n of moved) if (n.tabId != null) await ensureInWindow(s, inbox, n.tabId);
+    if (m.tabs === 'close') {
+      for (const n of members) removeNode(s, n);
+      await closeTabs(members.filter((n) => n.tabId != null).map((n) => n.tabId), { closeEmptyWindows: true });
+      return;
+    }
+    const inbox = s.groups.find((g) => g.id === INBOX);
+    for (const n of members) n.groupId = INBOX;
+    for (const n of members) if (n.tabId != null) await ensureInWindow(s, inbox, n.tabId);
   },
   // Gather every group's open tabs into that group's window (opens windows as needed).
   async arrangeWindows(s) {

@@ -68,7 +68,7 @@ function iconButton(label, title, onClick) {
   b.title = title;
   b.addEventListener('click', (e) => {
     e.stopPropagation();
-    onClick();
+    onClick(e);
   });
   return b;
 }
@@ -265,6 +265,17 @@ function groupMenuItems(g) {
     },
   ];
 }
+// An empty group is deleted right away; otherwise ask what should happen to its tabs.
+function confirmDeleteGroup(g, count, anchor) {
+  if (!count) return send({ cmd: 'deleteGroup', groupId: g.id });
+  const noun = count === 1 ? 'tab' : 'tabs';
+  const r = anchor.getBoundingClientRect();
+  openMenuAt(r.left - 120, r.bottom + 2, [
+    { label: `Move ${count} ${noun} to Unorganized Mess`, onClick: () => send({ cmd: 'deleteGroup', groupId: g.id, tabs: 'move' }) },
+    { label: `Close ${count === 1 ? 'the tab' : `all ${count} tabs`}`, onClick: () => send({ cmd: 'deleteGroup', groupId: g.id, tabs: 'close' }) },
+  ]);
+}
+
 function settingsMenuItems() {
   return [
     {
@@ -444,7 +455,7 @@ function renderGroup(g, all, shown, searching) {
   actions.append(iconButton('+', 'New tab in this group', () => send({ cmd: 'newTab', groupId: g.id })));
   if (live) actions.append(iconButton('⏏', 'Close open tabs (keep them saved)', () => send({ cmd: 'closeGroup', groupId: g.id })));
   if (live < all.length) actions.append(iconButton('↺', 'Reopen saved tabs', () => send({ cmd: 'restoreGroup', groupId: g.id })));
-  if (g.id !== INBOX) actions.append(iconButton('×', 'Delete group (tabs move to Unorganized Mess)', () => send({ cmd: 'deleteGroup', groupId: g.id })));
+  if (g.id !== INBOX) actions.append(iconButton('×', 'Delete group', (e) => confirmDeleteGroup(g, all.length, e.currentTarget)));
   head.append(actions);
 
   head.addEventListener('click', () => selectGroup(g.id));
