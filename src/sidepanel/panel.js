@@ -8,9 +8,28 @@ let dragging = null; // { type: 'node' | 'group', id }
 let pendingRender = false;
 let editing = null; // group id being renamed
 let filter = '';
+const selected = new Set(); // node ids
+let anchorId = null; // last plain/ctrl-clicked row, for shift-range
+let visibleOrder = []; // node ids in rendered order
 
-const send = (msg) => chrome.runtime.sendMessage(msg);
+// Surface failures (e.g. a stale service worker that doesn't know a command yet).
+const send = (msg) =>
+  chrome.runtime.sendMessage(msg).then(
+    (r) => {
+      if (r?.error) console.error('Uber Tabs:', msg.cmd, r.error);
+      return r;
+    },
+    (err) => {
+      console.error('Uber Tabs:', msg.cmd, 'failed:', err?.message || err);
+    }
+  );
 const favicon = (url) => `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&size=32`;
+
+function groupDot(g) {
+  const dot = el('span', 'dot');
+  dot.style.background = COLORS[(g.color || 0) % COLORS.length];
+  return dot;
+}
 
 function el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -40,10 +59,15 @@ function clearMarks() {
     .forEach((n) => n.classList.remove('drop-before', 'drop-after', 'drop-into', 'drop-end'));
 }
 function startDrag(e, type, id, node) {
-  dragging = { type, id };
+  // Dragging a selected row drags the whole selection.
+  const ids = type === 'node' ? targetIds(id) : [id];
+  dragging = { type, id, ids };
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', id);
-  setTimeout(() => node.classList.add('dragging'), 0);
+  setTimeout(() => {
+    node.classList.add('dragging');
+    if (ids.length > 1) document.querySelectorAll('.row.selected').forEach((r) => r.classList.add('dragging'));
+  }, 0);
 }
 function endDrag() {
   dragging = null;
@@ -60,7 +84,110 @@ function drop(cmd) {
 }
 const dragIs = (t) => dragging && dragging.type === t;
 
+// ---------- context menu ----------
+let menu = null;
+function closeMenu() {
+  menu?.remove();
+  menu = null;
+}
+function showNodeMenu(e, n) {
+  e.preventDefault();
+  // Don't let the document-level handler below immediately close the new menu.
+  e.stopPropagation();
+  closeMenu();
+  menu = el('div', 'ctx');
+
+  // "Move to group" opens a submenu listing every group.
+  const parent = el('div', 'ctx-item has-sub');
+  const ids = targetIds(n.id);
+  const gid = new Map(state.nodes.map((x) => [x.id, x.groupId]));
+  const fromGroups = new Set(ids.map((id) => gid.get(id)));
+  parent.append(el('span', 'grow', ids.length > 1 ? `Move ${ids.length} tabs to group` : 'Move to group'), el('span', 'ctx-arrow', '▸'));
+  const sub = el('div', 'ctx ctx-sub');
+  for (const g of state.groups) {
+    const same = fromGroups.size === 1 && fromGroups.has(g.id);
+    const item = el('div', 'ctx-item' + (same ? ' disabled' : ''));
+    item.append(groupDot(g), el('span', null, g.name));
+    if (!same) {
+      item.addEventListener('click', () => {
+        closeMenu();
+        send({ cmd: 'moveNodes', nodeIds: ids, groupId: g.id, beforeId: null });
+      });
+    }
+    sub.append(item);
+  }
+  const add = el('div', 'ctx-item', '+ New group…');
+  add.addEventListener('click', async () => {
+    closeMenu();
+    const r = await send({ cmd: 'addGroup', name: 'New group' });
+    if (!r?.id) return;
+    await send({ cmd: 'moveNodes', nodeIds: ids, groupId: r.id, beforeId: null });
+    editing = r.id;
+    render();
+  });
+  sub.append(el('div', 'ctx-sep'), add);
+  parent.append(sub);
+
+  const openSub = () => {
+    parent.classList.add('open');
+    const pr = parent.getBoundingClientRect();
+    const sr = sub.getBoundingClientRect();
+    // Prefer the right side; flip left if it doesn't fit.
+    const left = pr.right + sr.width <= innerWidth ? pr.right - 2 : Math.max(0, pr.left - sr.width + 2);
+    sub.style.left = left + 'px';
+    sub.style.top = Math.max(0, Math.min(pr.top - 4, innerHeight - sr.height)) + 'px';
+  };
+  // Small close delay so the pointer can travel diagonally into the submenu.
+  let closeTimer = null;
+  parent.addEventListener('mouseenter', () => {
+    clearTimeout(closeTimer);
+    openSub();
+  });
+  parent.addEventListener('mouseleave', () => {
+    closeTimer = setTimeout(() => parent.classList.remove('open'), 250);
+  });
+  parent.addEventListener('click', (ev) => {
+    ev.stopPropagation(); // keep the menu open; tap/click toggles the submenu
+    openSub();
+  });
+  menu.append(parent);
+
+  document.body.append(menu);
+  // Keep the menu inside the window.
+  const r = menu.getBoundingClientRect();
+  menu.style.left = Math.max(0, Math.min(e.clientX, innerWidth - r.width)) + 'px';
+  menu.style.top = Math.max(0, Math.min(e.clientY, innerHeight - r.height)) + 'px';
+}
+document.addEventListener('click', closeMenu);
+document.addEventListener('contextmenu', (e) => {
+  if (menu && !menu.contains(e.target)) closeMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (menu) closeMenu();
+  else if (selected.size && document.activeElement?.tagName !== 'INPUT') {
+    selected.clear();
+    render();
+  }
+});
+window.addEventListener('blur', closeMenu);
+tree.addEventListener('scroll', closeMenu);
+
 // ---------- rendering ----------
+// A row acts on the whole selection if it's part of it, otherwise just itself.
+const targetIds = (id) => (selected.has(id) ? [...selected] : [id]);
+
+function selectOnly(id) {
+  selected.clear();
+  selected.add(id);
+  anchorId = id;
+  paintSelection();
+}
+
+function paintSelection() {
+  document.querySelectorAll('.row[data-id]').forEach((r) => r.classList.toggle('selected', selected.has(r.dataset.id)));
+}
+
 function renderNode(n, g, siblings) {
   const live = n.tabId != null;
   const row = el('div', `row ${live ? 'live' : 'saved'}${live && n.tabId === activeTabId ? ' active' : ''}`);
@@ -74,13 +201,43 @@ function renderNode(n, g, siblings) {
 
   const x = el('button', 'x', '×');
   x.title = live ? 'Close tab (keeps it saved here). Alt-click to remove entirely.' : 'Remove from outline';
+  x.addEventListener('dblclick', (e) => e.stopPropagation());
   x.addEventListener('click', (e) => {
     e.stopPropagation();
     send({ cmd: live && !e.altKey ? 'closeTab' : 'deleteNode', nodeId: n.id });
   });
   row.append(x);
 
-  row.addEventListener('click', () => send({ cmd: 'open', nodeId: n.id }));
+  visibleOrder.push(n.id);
+  if (selected.has(n.id)) row.classList.add('selected');
+  row.dataset.id = n.id;
+  // Single click only selects; double-click opens. Selection changes toggle
+  // classes in place (no re-render) so the second click of a double-click
+  // still lands on the same element and fires dblclick.
+  row.addEventListener('click', (e) => {
+    if (e.shiftKey && anchorId && visibleOrder.includes(anchorId)) {
+      const a = visibleOrder.indexOf(anchorId);
+      const b = visibleOrder.indexOf(n.id);
+      if (!e.metaKey && !e.ctrlKey) selected.clear();
+      for (const id of visibleOrder.slice(Math.min(a, b), Math.max(a, b) + 1)) selected.add(id);
+    } else if (e.metaKey || e.ctrlKey) {
+      selected.has(n.id) ? selected.delete(n.id) : selected.add(n.id);
+      anchorId = n.id;
+    } else {
+      selectOnly(n.id);
+      return;
+    }
+    paintSelection();
+  });
+  row.addEventListener('dblclick', (e) => {
+    if (e.shiftKey || e.metaKey || e.ctrlKey) return;
+    send({ cmd: 'open', nodeId: n.id });
+  });
+  row.addEventListener('contextmenu', (e) => {
+    // Right-clicking outside the selection selects just that row.
+    if (!selected.has(n.id)) selectOnly(n.id);
+    showNodeMenu(e, n);
+  });
   row.addEventListener('dragstart', (e) => startDrag(e, 'node', n.id, row));
   row.addEventListener('dragend', endDrag);
   row.addEventListener('dragover', (e) => {
@@ -96,7 +253,7 @@ function renderNode(n, g, siblings) {
     e.stopPropagation();
     const i = siblings.findIndex((s) => s.id === n.id);
     const beforeId = half(e) === 'before' ? n.id : siblings[i + 1]?.id ?? null;
-    drop({ cmd: 'moveNode', nodeId: dragging.id, groupId: g.id, beforeId });
+    drop({ cmd: 'moveNodes', nodeIds: dragging.ids, groupId: g.id, beforeId });
   });
   return row;
 }
@@ -109,8 +266,7 @@ function renderGroup(g, all, shown, searching) {
   head.draggable = editing !== g.id;
   head.append(el('span', 'chev', collapsed ? '▸' : '▾'));
 
-  const dot = el('span', 'dot');
-  dot.style.background = COLORS[(g.color || 0) % COLORS.length];
+  const dot = groupDot(g);
   dot.title = 'Change color';
   dot.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -176,7 +332,7 @@ function renderGroup(g, all, shown, searching) {
     e.preventDefault();
     e.stopPropagation();
     if (dragIs('node')) {
-      drop({ cmd: 'moveNode', nodeId: dragging.id, groupId: g.id, beforeId: all[0]?.id ?? null });
+      drop({ cmd: 'moveNodes', nodeIds: dragging.ids, groupId: g.id, beforeId: all[0]?.id ?? null });
     } else {
       const i = state.groups.findIndex((x) => x.id === g.id);
       const beforeId = half(e) === 'before' ? g.id : state.groups[i + 1]?.id ?? null;
@@ -200,7 +356,7 @@ function renderGroup(g, all, shown, searching) {
   sec.addEventListener('drop', (e) => {
     if (!dragIs('node')) return;
     e.preventDefault();
-    drop({ cmd: 'moveNode', nodeId: dragging.id, groupId: g.id, beforeId: null });
+    drop({ cmd: 'moveNodes', nodeIds: dragging.ids, groupId: g.id, beforeId: null });
   });
   return sec;
 }
@@ -211,6 +367,11 @@ function render() {
     return;
   }
   const q = filter.trim().toLowerCase();
+  if (selected.size) {
+    const ids = new Set(state.nodes.map((n) => n.id));
+    for (const id of [...selected]) if (!ids.has(id)) selected.delete(id);
+  }
+  visibleOrder = [];
   tree.textContent = '';
   for (const g of state.groups) {
     const all = state.nodes.filter((n) => n.groupId === g.id);

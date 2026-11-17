@@ -119,21 +119,32 @@ function reconcile(s, tabs) {
   }
 }
 
-function moveNode(s, nodeId, groupId, beforeId) {
-  const n = s.nodes.find((x) => x.id === nodeId);
-  if (!n || !s.groups.some((g) => g.id === groupId)) return;
-  if (beforeId === nodeId) {
-    n.groupId = groupId;
-    return;
+// Move one or more nodes into a group before `beforeId` (or at its end), keeping their relative order.
+function moveNodes(s, ids, groupId, beforeId) {
+  const set = new Set(ids);
+  if (!s.groups.some((g) => g.id === groupId)) return;
+  const moving = s.nodes.filter((n) => set.has(n.id));
+  if (!moving.length) return;
+  // If the anchor is itself being moved, anchor on the next node that stays put.
+  let anchor = beforeId;
+  if (anchor && set.has(anchor)) {
+    let i = s.nodes.findIndex((x) => x.id === anchor);
+    while (i < s.nodes.length && set.has(s.nodes[i].id)) i++;
+    anchor = s.nodes[i]?.id ?? null;
   }
-  s.nodes.splice(s.nodes.indexOf(n), 1);
-  n.groupId = groupId;
-  let idx = beforeId ? s.nodes.findIndex((x) => x.id === beforeId) : -1;
+  s.nodes = s.nodes.filter((n) => !set.has(n.id));
+  for (const n of moving) n.groupId = groupId;
+  let idx = anchor ? s.nodes.findIndex((x) => x.id === anchor) : -1;
   if (idx < 0) {
-    idx = s.nodes.map((x) => x.groupId).lastIndexOf(groupId) + 1;
-    if (idx === 0) idx = s.nodes.length;
+    idx = s.nodes.length;
+    for (let i = s.nodes.length - 1; i >= 0; i--) {
+      if (s.nodes[i].groupId === groupId) {
+        idx = i + 1;
+        break;
+      }
+    }
   }
-  s.nodes.splice(idx, 0, n);
+  s.nodes.splice(idx, 0, ...moving);
 }
 
 function moveGroup(s, groupId, beforeId) {
@@ -193,7 +204,7 @@ const commands = {
     const [n] = s.nodes.splice(i, 1);
     if (n.tabId != null) await closeTabs([n.tabId]);
   },
-  moveNode: (s, m) => moveNode(s, m.nodeId, m.groupId, m.beforeId),
+  moveNodes: (s, m) => moveNodes(s, m.nodeIds, m.groupId, m.beforeId),
   moveGroup: (s, m) => moveGroup(s, m.groupId, m.beforeId),
   addGroup(s, m) {
     const g = { id: uid(), name: m.name || 'New group', collapsed: false, color: s.groups.length % 8 + 1 };
@@ -252,7 +263,7 @@ chrome.tabs.onUpdated.addListener((id, change, t) =>
         adopt(s, t);
         if (s.pendingGroup?.tabId === id) {
           const added = s.nodes.find((x) => x.tabId === id);
-          if (added) moveNode(s, added.id, s.pendingGroup.groupId, null);
+          if (added) moveNodes(s, [added.id], s.pendingGroup.groupId, null);
           delete s.pendingGroup;
         }
       }
