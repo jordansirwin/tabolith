@@ -26,9 +26,11 @@ const send = (msg) =>
   );
 const favicon = (url) => `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&size=32`;
 
+const groupColor = (g) => COLORS[(g.color || 0) % COLORS.length];
+
 function groupDot(g) {
   const dot = el('span', 'dot');
-  dot.style.background = COLORS[(g.color || 0) % COLORS.length];
+  dot.style.background = groupColor(g);
   return dot;
 }
 
@@ -323,6 +325,7 @@ function renderGroup(g, all, shown, searching) {
   const head = el('div', 'ghead');
   head.draggable = editing !== g.id;
   head.dataset.gid = g.id;
+  head.style.setProperty('--gc', groupColor(g));
   if (selectedGroup === g.id) head.classList.add('selected');
   head.append(iconButton(collapsed ? '▸' : '▾', collapsed ? 'Expand' : 'Collapse', () => send({ cmd: 'toggleGroup', groupId: g.id })));
   head.lastChild.className = 'chev';
