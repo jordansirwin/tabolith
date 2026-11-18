@@ -553,15 +553,18 @@ chrome.tabs.onReplaced.addListener((added, removed) =>
 // ---------- lifecycle ----------
 // Tab IDs don't survive a browser restart: demote everything to "saved", then
 // re-link tabs that Chrome restores (matched by URL).
-chrome.runtime.onStartup.addListener(() =>
-  run(async (s) => {
+chrome.runtime.onStartup.addListener(async () => {
+  await run(async (s) => {
     for (const n of s.nodes) n.tabId = null;
     for (const g of s.groups) delete g.windowId; // window IDs don't survive a restart
     reconcile(s, await chrome.tabs.query({}));
     relinkGroupWindows(s);
     await mapInboxWindow(s);
-  })
-);
+  });
+  // Optional (⚙ menu): open the Tabolith window along with Chrome.
+  const { openOnStartup } = await chrome.storage.local.get('openOnStartup');
+  if (openOnStartup) await openPanelWindow();
+});
 
 chrome.runtime.onInstalled.addListener(() =>
   run(async (s) => reconcile(s, await chrome.tabs.query({})))

@@ -276,11 +276,21 @@ function confirmDeleteGroup(g, count, anchor) {
   ]);
 }
 
+let openOnStartup = false;
+chrome.storage.local.get('openOnStartup').then((r) => (openOnStartup = !!r.openOnStartup));
+
 function settingsMenuItems() {
   return [
     {
       label: 'Arrange groups into windows',
       onClick: () => send({ cmd: 'arrangeWindows' }),
+    },
+    {
+      label: `${openOnStartup ? '✓ ' : ''}Open when Chrome starts`,
+      onClick: () => {
+        openOnStartup = !openOnStartup;
+        chrome.storage.local.set({ openOnStartup });
+      },
     },
     {
       label: 'Font size',

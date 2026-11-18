@@ -19,6 +19,7 @@ monolith of tabs, neatly stacked into groups you name yourself.
 - 🔄 **Reload a group.** Right-click a group → Reload tabs refreshes every open tab in it.
 - 🔭 **Find a group.** Double-click a group header to jump to the browser window holding its tabs.
 - 🔎 **Search.** Find that recipe from March by title, URL, or group name.
+- 🚀 **Open at launch.** Turn on ⚙ → *Open when Chrome starts* and the Tabolith window appears whenever Chrome does.
 - ⌨️ **Keyboard shortcut.** Press Option+Shift+A (Mac) or Alt+Shift+S (Windows/Linux) from any Chrome window to open Tabolith with the search box ready. Change it at `chrome://extensions/shortcuts`.
 
 ## Install (dev edition)
