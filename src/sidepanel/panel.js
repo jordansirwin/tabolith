@@ -276,8 +276,8 @@ function confirmDeleteGroup(g, count, anchor) {
   ]);
 }
 
-let openOnStartup = false;
-chrome.storage.local.get('openOnStartup').then((r) => (openOnStartup = !!r.openOnStartup));
+let openOnStartup = false; // refreshed each time the settings menu opens
+const CONFIRM_RESTORE_OVER = 20; // ask before reopening more saved tabs than this
 
 function settingsMenuItems() {
   const savedCount = state.nodes.filter((n) => n.tabId == null).length;
@@ -285,7 +285,10 @@ function settingsMenuItems() {
     {
       label: savedCount ? `Reopen all saved tabs (${savedCount})` : 'Reopen all saved tabs',
       disabled: !savedCount,
-      onClick: () => send({ cmd: 'restoreAll' }),
+      onClick: () => {
+        if (savedCount > CONFIRM_RESTORE_OVER && !confirm(`Reopen ${savedCount} saved tabs?`)) return;
+        send({ cmd: 'restoreAll' });
+      },
     },
     {
       label: 'Arrange groups into windows',
@@ -565,9 +568,10 @@ document.getElementById('search').addEventListener('input', (e) => {
   filter = e.target.value;
   render();
 });
-document.getElementById('settings').addEventListener('click', (e) => {
+document.getElementById('settings').addEventListener('click', async (e) => {
   e.stopPropagation(); // keep the document-level click handler from closing the new menu
   const r = e.currentTarget.getBoundingClientRect();
+  openOnStartup = !!(await chrome.storage.local.get('openOnStartup')).openOnStartup;
   openMenuAt(r.right - 120, r.bottom + 2, settingsMenuItems()); // under the button, mostly right-aligned
 });
 document.getElementById('add-group').addEventListener('click', async () => {

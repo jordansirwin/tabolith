@@ -223,13 +223,20 @@ async function closeTabs(ids, { closeEmptyWindows = false } = {}) {
   const byWin = {};
   for (const t of tabs) (byWin[t.windowId] ||= []).push(t.id);
   // Don't let closing the last tab of a window close the window.
-  const windowCount = closeEmptyWindows ? (await chrome.windows.getAll({ windowTypes: ['normal'] })).length : 0;
+  // Windows that would be left with no tabs.
+  const emptying = [];
   for (const [w, closing] of Object.entries(byWin)) {
     const all = await chrome.tabs.query({ windowId: +w });
-    if (!all.every((t) => closing.includes(t.id))) continue;
-    if (closeEmptyWindows && windowCount > 1) continue;
-    await chrome.tabs.create({ windowId: +w, active: true });
+    if (all.every((t) => closing.includes(t.id))) emptying.push(+w);
   }
+  // Keep a blank tab in each emptied window, or (when windows may close) in just one of them if
+  // no other browser window would survive.
+  let keep = emptying;
+  if (closeEmptyWindows) {
+    const total = (await chrome.windows.getAll({ windowTypes: ['normal'] })).length;
+    keep = total > emptying.length ? [] : emptying.slice(0, 1);
+  }
+  for (const windowId of keep) await chrome.tabs.create({ windowId, active: true });
   await chrome.tabs.remove(tabs.map((t) => t.id)).catch(() => {});
 }
 
@@ -395,7 +402,9 @@ const commands = {
     const members = s.nodes.filter((n) => n.groupId === m.groupId);
     s.groups = s.groups.filter((g) => g.id !== m.groupId);
     if (m.tabs === 'close') {
-      for (const n of members) removeNode(s, n);
+      // Not remembered for position restore: the group they'd return to is gone.
+      const gone = new Set(members);
+      s.nodes = s.nodes.filter((n) => !gone.has(n));
       await closeTabs(members.filter((n) => n.tabId != null).map((n) => n.tabId), { closeEmptyWindows: true });
       return;
     }
