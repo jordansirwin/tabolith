@@ -448,6 +448,25 @@ const commands = {
     for (const n of s.nodes.filter((x) => x.groupId === m.groupId && x.tabId == null)) await openNode(s, n, false);
   },
   // Reopen every saved tab in every group (each opens in its group's window).
+  // Replace all groups and tabs with an exported backup; live tabs re-link by URL.
+  async importState(s, m) {
+    const d = m.data;
+    if (!d || !Array.isArray(d.groups) || !Array.isArray(d.nodes)) throw new Error('Not a Tabolith export');
+    const str = (v) => (typeof v === 'string' ? v : '');
+    const groups = d.groups
+      .filter((g) => g && str(g.id))
+      .map((g) => ({ id: str(g.id), name: str(g.name), collapsed: !!g.collapsed, color: Number(g.color) || 0 }));
+    if (!groups.some((g) => g.id === INBOX)) groups.unshift({ id: INBOX, name: INBOX_NAME, collapsed: false, color: 0 });
+    const ids = new Set(groups.map((g) => g.id));
+    const nodes = d.nodes
+      .filter((n) => n && str(n.id) && str(n.url) && !n.url.startsWith(PANEL_URL))
+      .map((n) => ({ id: str(n.id), groupId: ids.has(n.groupId) ? n.groupId : INBOX, url: n.url, title: str(n.title) || n.url, tabId: null }));
+    s.groups = groups;
+    s.nodes = nodes;
+    delete s.pendingGroup;
+    reconcile(s, await chrome.tabs.query({}));
+    return { state: s };
+  },
   async restoreAll(s) {
     for (const n of s.nodes.filter((x) => x.tabId == null)) await openNode(s, n, false);
   },

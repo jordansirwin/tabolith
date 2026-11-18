@@ -107,6 +107,16 @@ function drop(cmd) {
   dragging = null;
   send(cmd);
 }
+// Chrome's native edge auto-scroll is unreliable in the side panel, so do it by hand.
+tree.addEventListener('dragover', (e) => {
+  if (!dragging) return;
+  const r = tree.getBoundingClientRect();
+  const zone = Math.min(60, r.height / 3);
+  let dy = 0;
+  if (e.clientY < r.top + zone) dy = -Math.ceil(((r.top + zone - e.clientY) / zone) * 18);
+  else if (e.clientY > r.bottom - zone) dy = Math.ceil(((e.clientY - (r.bottom - zone)) / zone) * 18);
+  if (dy) tree.scrollTop += dy;
+});
 const dragIs = (t) => dragging && dragging.type === t;
 
 // ---------- context menu ----------
@@ -276,6 +286,40 @@ function confirmDeleteGroup(g, count, anchor) {
   ]);
 }
 
+async function exportData() {
+  const { state: st } = await chrome.storage.local.get('state');
+  const data = {
+    tabolith: 1,
+    groups: st.groups.map(({ id, name, collapsed, color }) => ({ id, name, collapsed, color })),
+    nodes: st.nodes.map(({ id, groupId, url, title }) => ({ id, groupId, url, title })),
+  };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  a.download = `tabolith-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function importData() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch {
+      return alert('That file is not valid JSON.');
+    }
+    if (!Array.isArray(data?.groups) || !Array.isArray(data?.nodes)) return alert('That is not a Tabolith export.');
+    if (!confirm(`Replace all current groups and tabs with ${data.groups.length} groups and ${data.nodes.length} tabs from this file?`)) return;
+    const r = await send({ cmd: 'importState', data });
+    if (r?.error) alert('Import failed: ' + r.error);
+  };
+  input.click();
+}
+
 let openOnStartup = false; // refreshed each time the settings menu opens
 const CONFIRM_RESTORE_OVER = 20; // ask before reopening more saved tabs than this
 
@@ -313,6 +357,13 @@ function settingsMenuItems() {
           } catch {}
         },
       })),
+    },
+    {
+      label: 'Import/Export',
+      submenu: [
+        { label: 'Export groups and tabs…', onClick: exportData },
+        { label: 'Import groups and tabs…', onClick: importData },
+      ],
     },
   ];
 }
