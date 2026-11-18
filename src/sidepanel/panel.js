@@ -320,6 +320,8 @@ function importData() {
   input.click();
 }
 
+let syncOn = false;
+let syncError = '';
 let openOnStartup = false; // refreshed each time the settings menu opens
 const CONFIRM_RESTORE_OVER = 20; // ask before reopening more saved tabs than this
 
@@ -343,6 +345,16 @@ function settingsMenuItems() {
       onClick: () => {
         openOnStartup = !openOnStartup;
         chrome.storage.local.set({ openOnStartup });
+      },
+    },
+    {
+      label: `${syncOn ? '✓ ' : ''}Sync with Google account${syncOn && syncError ? ` – ${syncError}` : ''}`,
+      onClick: async () => {
+        const on = !syncOn;
+        const r = await send({ cmd: 'setSync', on });
+        if (r?.error) return alert('Sync failed: ' + r.error);
+        syncOn = on;
+        if (r?.restored) alert('Restored your groups and tabs from sync.');
       },
     },
     {
@@ -623,6 +635,8 @@ document.getElementById('settings').addEventListener('click', async (e) => {
   e.stopPropagation(); // keep the document-level click handler from closing the new menu
   const r = e.currentTarget.getBoundingClientRect();
   openOnStartup = !!(await chrome.storage.local.get('openOnStartup')).openOnStartup;
+  syncOn = !!(await chrome.storage.sync.get('tb_on')).tb_on;
+  syncError = (await chrome.storage.local.get('syncError')).syncError || '';
   openMenuAt(r.right - 120, r.bottom + 2, settingsMenuItems()); // under the button, mostly right-aligned
 });
 document.getElementById('add-group').addEventListener('click', async () => {
@@ -653,6 +667,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 if (location.hash === '#search') focusSearch(); // the shortcut opened a fresh panel
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.syncError?.newValue) console.warn('Tabolith sync:', changes.syncError.newValue);
   if (area === 'local' && changes.state?.newValue) {
     state = changes.state.newValue;
     render();

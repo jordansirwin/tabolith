@@ -64,7 +64,83 @@ async function load() {
     nodes: [],
   };
 }
-const save = (s) => chrome.storage.local.set({ state: s });
+const save = async (s) => {
+  await chrome.storage.local.set({ state: s });
+  scheduleSync(s);
+};
+
+function applyImport(s, d) {
+  if (!d || !Array.isArray(d.groups) || !Array.isArray(d.nodes)) throw new Error('Not a Tabolith export');
+  const str = (v) => (typeof v === 'string' ? v : '');
+  const groups = d.groups
+    .filter((g) => g && str(g.id))
+    .map((g) => ({ id: str(g.id), name: str(g.name), collapsed: !!g.collapsed, color: Number(g.color) || 0 }));
+  if (!groups.some((g) => g.id === INBOX)) groups.unshift({ id: INBOX, name: INBOX_NAME, collapsed: false, color: 0 });
+  const ids = new Set(groups.map((g) => g.id));
+  s.groups = groups;
+  s.nodes = d.nodes
+    .filter((n) => n && str(n.id) && str(n.url) && !n.url.startsWith(PANEL_URL))
+    .map((n) => ({ id: str(n.id), groupId: ids.has(n.groupId) ? n.groupId : INBOX, url: n.url, title: str(n.title) || n.url, tabId: null }));
+  delete s.pendingGroup;
+}
+
+// ---------- optional sync (chrome.storage.sync) ----------
+// The tree is gzipped + base64'd and split into chunks to fit sync's 8KB-per-item / 100KB quotas.
+// The on/off flag lives in sync too, so a reinstall picks the setting and the data back up.
+const SYNC_CHUNK = 7000;
+const SYNC_MAX = 90000;
+let syncTimer;
+let lastSynced = null;
+
+const snapshot = (s) => ({
+  groups: s.groups.map(({ id, name, collapsed, color }) => ({ id, name, collapsed, color })),
+  nodes: s.nodes.map(({ id, groupId, url, title }) => ({ id, groupId, url, title })),
+});
+async function pipe(bytes, stream) {
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+}
+async function pack(obj) {
+  const u8 = await pipe(new TextEncoder().encode(JSON.stringify(obj)), new CompressionStream('gzip'));
+  let bin = '';
+  for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+async function unpack(str) {
+  const u8 = await pipe(Uint8Array.from(atob(str), (c) => c.charCodeAt(0)), new DecompressionStream('gzip'));
+  return JSON.parse(new TextDecoder().decode(u8));
+}
+async function pushSync(snap, force) {
+  if (!force && !(await chrome.storage.sync.get('tb_on')).tb_on) return;
+  const packed = await pack(snap);
+  if (!force && packed === lastSynced) return;
+  if (packed.length > SYNC_MAX) throw new Error('Too much to fit in Chrome sync (about 90KB compressed).');
+  const old = (await chrome.storage.sync.get('tb_n')).tb_n || 0;
+  const parts = Math.ceil(packed.length / SYNC_CHUNK);
+  const items = { tb_n: parts };
+  for (let i = 0; i < parts; i++) items['tb_' + i] = packed.slice(i * SYNC_CHUNK, (i + 1) * SYNC_CHUNK);
+  await chrome.storage.sync.set(items);
+  const stale = [];
+  for (let i = parts; i < old; i++) stale.push('tb_' + i);
+  if (stale.length) await chrome.storage.sync.remove(stale);
+  lastSynced = packed;
+  await chrome.storage.local.remove('syncError');
+}
+async function pullSync(ignoreFlag) {
+  const { tb_on, tb_n } = await chrome.storage.sync.get(['tb_on', 'tb_n']);
+  if ((!tb_on && !ignoreFlag) || !tb_n) return null;
+  const keys = Array.from({ length: tb_n }, (_, i) => 'tb_' + i);
+  const got = await chrome.storage.sync.get(keys);
+  if (keys.some((k) => typeof got[k] !== 'string')) return null;
+  return unpack(keys.map((k) => got[k]).join(''));
+}
+function scheduleSync(s) {
+  clearTimeout(syncTimer);
+  const snap = snapshot(s);
+  syncTimer = setTimeout(
+    () => pushSync(snap).catch((e) => chrome.storage.local.set({ syncError: String(e.message || e) })),
+    5000
+  );
+}
 
 // Serialize every mutation so concurrent events can't clobber each other.
 let queue = Promise.resolve();
@@ -447,26 +523,34 @@ const commands = {
   async restoreGroup(s, m) {
     for (const n of s.nodes.filter((x) => x.groupId === m.groupId && x.tabId == null)) await openNode(s, n, false);
   },
-  // Reopen every saved tab in every group (each opens in its group's window).
   // Replace all groups and tabs with an exported backup; live tabs re-link by URL.
   async importState(s, m) {
-    const d = m.data;
-    if (!d || !Array.isArray(d.groups) || !Array.isArray(d.nodes)) throw new Error('Not a Tabolith export');
-    const str = (v) => (typeof v === 'string' ? v : '');
-    const groups = d.groups
-      .filter((g) => g && str(g.id))
-      .map((g) => ({ id: str(g.id), name: str(g.name), collapsed: !!g.collapsed, color: Number(g.color) || 0 }));
-    if (!groups.some((g) => g.id === INBOX)) groups.unshift({ id: INBOX, name: INBOX_NAME, collapsed: false, color: 0 });
-    const ids = new Set(groups.map((g) => g.id));
-    const nodes = d.nodes
-      .filter((n) => n && str(n.id) && str(n.url) && !n.url.startsWith(PANEL_URL))
-      .map((n) => ({ id: str(n.id), groupId: ids.has(n.groupId) ? n.groupId : INBOX, url: n.url, title: str(n.title) || n.url, tabId: null }));
-    s.groups = groups;
-    s.nodes = nodes;
-    delete s.pendingGroup;
+    applyImport(s, m.data);
     reconcile(s, await chrome.tabs.query({}));
     return { state: s };
   },
+  // Turn sync with the Google account on or off.
+  async setSync(s, m) {
+    if (!m.on) {
+      await chrome.storage.sync.clear();
+      await chrome.storage.local.remove('syncError');
+      return {};
+    }
+    // Brand-new install with a synced copy available: restore it instead of overwriting it.
+    if (!s.nodes.length) {
+      const snap = await pullSync(true);
+      if (snap) {
+        applyImport(s, snap);
+        reconcile(s, await chrome.tabs.query({}));
+        await chrome.storage.sync.set({ tb_on: true });
+        return { state: s, restored: true };
+      }
+    }
+    await pushSync(snapshot(s), true);
+    await chrome.storage.sync.set({ tb_on: true });
+    return {};
+  },
+  // Reopen every saved tab in every group (each opens in its group's window).
   async restoreAll(s) {
     for (const n of s.nodes.filter((x) => x.tabId == null)) await openNode(s, n, false);
   },
@@ -599,5 +683,16 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 
 chrome.runtime.onInstalled.addListener(() =>
-  run(async (s) => reconcile(s, await chrome.tabs.query({})))
+  run(async (s) => {
+    // Fresh install with sync enabled on this account: bring the saved tree back.
+    if (!s.nodes.length) {
+      try {
+        const snap = await pullSync();
+        if (snap) applyImport(s, snap);
+      } catch (e) {
+        console.error('Tabolith: sync restore failed', e);
+      }
+    }
+    reconcile(s, await chrome.tabs.query({}));
+  })
 );
