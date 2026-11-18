@@ -438,6 +438,10 @@ const commands = {
   async restoreGroup(s, m) {
     for (const n of s.nodes.filter((x) => x.groupId === m.groupId && x.tabId == null)) await openNode(s, n, false);
   },
+  // Reopen every saved tab in every group (each opens in its group's window).
+  async restoreAll(s) {
+    for (const n of s.nodes.filter((x) => x.tabId == null)) await openNode(s, n, false);
+  },
   async newTab(s, m) {
     const g = s.groups.find((x) => x.id === m.groupId);
     if (g?.id === INBOX) await mapInboxWindow(s);

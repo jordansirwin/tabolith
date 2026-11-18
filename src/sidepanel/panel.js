@@ -280,7 +280,13 @@ let openOnStartup = false;
 chrome.storage.local.get('openOnStartup').then((r) => (openOnStartup = !!r.openOnStartup));
 
 function settingsMenuItems() {
+  const savedCount = state.nodes.filter((n) => n.tabId == null).length;
   return [
+    {
+      label: savedCount ? `Reopen all saved tabs (${savedCount})` : 'Reopen all saved tabs',
+      disabled: !savedCount,
+      onClick: () => send({ cmd: 'restoreAll' }),
+    },
     {
       label: 'Arrange groups into windows',
       onClick: () => send({ cmd: 'arrangeWindows' }),

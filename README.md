@@ -15,7 +15,7 @@ monolith of tabs, neatly stacked into groups you name yourself.
 - 🖱️ **Multi-select.** Cmd/Ctrl-click to grab a bunch, Shift-click to grab a stretch, then move or close them all at once from the right-click menu.
 - 🔁 **Put it back.** Close a tab and reopen it (say, with Cmd/Ctrl+Shift+T) within 10 minutes, and it returns to its old group and spot.
 - 💤 **Saved tabs.** Close a whole group with ⏏, close a browser window, or quit Chrome, and the tabs stay in the outline as "saved" entries. Closing a single tab removes it, so the tower doesn't fill up with ghosts.
-- ↺ **Reopen on demand.** Wake a saved tab with a double-click, or revive an entire group in one go.
+- ↺ **Reopen on demand.** Wake a saved tab with a double-click, revive an entire group in one go, or bring back every saved tab at once from ⚙ → *Reopen all saved tabs*.
 - 🔄 **Reload a group.** Right-click a group → Reload tabs refreshes every open tab in it.
 - 🔭 **Find a group.** Double-click a group header to jump to the browser window holding its tabs.
 - 🔎 **Search.** Find that recipe from March by title, URL, or group name.
