@@ -1,4 +1,3 @@
-const INBOX = 'inbox';
 const COLORS = [
   '#8b949e', '#e5534b', '#e0823d', '#c9a227', '#57ab5a', '#39a9c7', '#6d8cf5', '#b083f0', '#e275ad',
   '#1fa89a', '#8cc63f', '#f2a900', '#a0724a', '#ff7f6e', '#d6409f', '#4b52c9', '#5bb8f5', '#6b7b8c', '#6fd6a3',
@@ -243,7 +242,6 @@ function groupMenuItems(g) {
   return [
     {
       label: 'Rename',
-      disabled: g.id === INBOX,
       onClick: () => {
         editing = g.id;
         render();
@@ -275,15 +273,10 @@ function groupMenuItems(g) {
     },
   ];
 }
-// An empty group is deleted right away; otherwise ask what should happen to its tabs.
-function confirmDeleteGroup(g, count, anchor) {
-  if (!count) return send({ cmd: 'deleteGroup', groupId: g.id });
-  const noun = count === 1 ? 'tab' : 'tabs';
-  const r = anchor.getBoundingClientRect();
-  openMenuAt(r.left - 120, r.bottom + 2, [
-    { label: `Move ${count} ${noun} to Unorganized Mess`, onClick: () => send({ cmd: 'deleteGroup', groupId: g.id, tabs: 'move' }) },
-    { label: `Close ${count === 1 ? 'the tab' : `all ${count} tabs`}`, onClick: () => send({ cmd: 'deleteGroup', groupId: g.id, tabs: 'close' }) },
-  ]);
+// An empty group is deleted right away; otherwise confirm, since its tabs get closed.
+function confirmDeleteGroup(g, count) {
+  if (count && !confirm(`Delete "${g.name}" and close ${count === 1 ? 'its tab' : `all ${count} tabs`}?`)) return;
+  return send({ cmd: 'deleteGroup', groupId: g.id });
 }
 
 async function exportData() {
@@ -537,7 +530,7 @@ function renderGroup(g, all, shown, searching) {
   actions.append(iconButton('+', 'New tab in this group', () => send({ cmd: 'newTab', groupId: g.id })));
   if (live) actions.append(iconButton('⏏', 'Close open tabs (keep them saved)', () => send({ cmd: 'closeGroup', groupId: g.id })));
   if (live < all.length) actions.append(iconButton('↺', 'Reopen saved tabs', () => send({ cmd: 'restoreGroup', groupId: g.id })));
-  if (g.id !== INBOX) actions.append(iconButton('×', 'Delete group', (e) => confirmDeleteGroup(g, all.length, e.currentTarget)));
+  actions.append(iconButton('×', 'Delete group and close its tabs', () => confirmDeleteGroup(g, all.length)));
   head.append(actions);
 
   head.addEventListener('click', () => selectGroup(g.id));

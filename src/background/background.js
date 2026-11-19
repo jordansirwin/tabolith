@@ -46,23 +46,15 @@ async function targetWindowId() {
   return (wins.find((w) => w.focused) || wins[wins.length - 1])?.id;
 }
 
-const INBOX = 'inbox';
-const INBOX_NAME = 'Unorganized Mess';
 
 // ---------- state ----------
 async function load() {
   const { state } = await chrome.storage.local.get('state');
   if (state) {
-    // The default group's name is fixed (it can't be renamed).
-    const inbox = state.groups.find((g) => g.id === INBOX);
-    if (inbox) inbox.name = INBOX_NAME;
     state.nodes = state.nodes.filter((n) => !n.url?.startsWith(PANEL_URL)); // the panel never belongs in its own outline
     return state;
   }
-  return {
-    groups: [{ id: INBOX, name: INBOX_NAME, collapsed: false, color: 0 }],
-    nodes: [],
-  };
+  return { groups: [], nodes: [] };
 }
 const save = async (s) => {
   await chrome.storage.local.set({ state: s });
@@ -75,12 +67,11 @@ function applyImport(s, d) {
   const groups = d.groups
     .filter((g) => g && str(g.id))
     .map((g) => ({ id: str(g.id), name: str(g.name), collapsed: !!g.collapsed, color: Number(g.color) || 0 }));
-  if (!groups.some((g) => g.id === INBOX)) groups.unshift({ id: INBOX, name: INBOX_NAME, collapsed: false, color: 0 });
   const ids = new Set(groups.map((g) => g.id));
   s.groups = groups;
   s.nodes = d.nodes
-    .filter((n) => n && str(n.id) && str(n.url) && !n.url.startsWith(PANEL_URL))
-    .map((n) => ({ id: str(n.id), groupId: ids.has(n.groupId) ? n.groupId : INBOX, url: n.url, title: str(n.title) || n.url, tabId: null }));
+    .filter((n) => n && str(n.id) && str(n.url) && !n.url.startsWith(PANEL_URL) && ids.has(n.groupId))
+    .map((n) => ({ id: str(n.id), groupId: n.groupId, url: n.url, title: str(n.title) || n.url, tabId: null }));
   delete s.pendingGroup;
 }
 
@@ -156,13 +147,10 @@ function run(fn) {
 }
 
 const uid = () => crypto.randomUUID();
-const isBlank = (u) =>
-  !u ||
-  u.startsWith(PANEL_URL) ||
-  u === 'about:blank' ||
-  u.startsWith('chrome://newtab') ||
-  u.startsWith('chrome://new-tab-page') ||
-  u.startsWith('chrome-search://');
+// Tabs with no URL yet, and the panel itself, never go in the outline. New-tab pages do.
+const isIgnored = (u) => !u || u.startsWith(PANEL_URL);
+const isNewTabPage = (u) =>
+  u === 'about:blank' || u.startsWith('chrome://newtab') || u.startsWith('chrome://new-tab-page') || u.startsWith('chrome-search://');
 const tabUrl = (t) => t.url || t.pendingUrl || '';
 
 // Index just after the last node of a group (end of the list if the group is empty).
@@ -194,7 +182,7 @@ function rememberClosed(s, n) {
 
 // Remove a node from the outline, remembering its position if it had an open tab.
 function removeNode(s, n) {
-  if (n.tabId != null) rememberClosed(s, n);
+  if (n.tabId != null && !isNewTabPage(n.url)) rememberClosed(s, n); // a new-tab page has no place worth returning to
   s.nodes.splice(s.nodes.indexOf(n), 1);
 }
 
@@ -219,20 +207,22 @@ function restoreClosed(s, n, url) {
 // Returns the node if it was put back where a recently closed tab used to be, else null.
 function adopt(s, t) {
   const url = tabUrl(t);
-  if (isBlank(url)) return null;
+  if (isIgnored(url)) return null;
   let restored = null;
 
   // Re-link to a saved node with the same URL (restart / session restore).
   let n = s.nodes.find((x) => x.tabId == null && x.url === url);
   if (!n) {
-    n = { id: uid(), groupId: INBOX };
+    n = { id: uid() };
     if (restoreClosed(s, n, url)) {
       restored = n;
     } else {
       // A tab belongs to the group that owns its window; otherwise follow its opener.
+      // Tabs in windows we don't track (popups, incognito) stay out of the outline.
       const opener = t.openerTabId != null && s.nodes.find((x) => x.tabId === t.openerTabId);
       const windowGroup = s.groups.find((g) => g.windowId != null && g.windowId === t.windowId);
-      n.groupId = windowGroup?.id ?? opener?.groupId ?? INBOX;
+      n.groupId = windowGroup?.id ?? opener?.groupId;
+      if (!n.groupId) return null;
       if (opener && opener.groupId === n.groupId) s.nodes.splice(s.nodes.indexOf(opener) + 1, 0, n);
       else s.nodes.splice(groupEndIndex(s, n.groupId), 0, n);
     }
@@ -252,7 +242,7 @@ function reconcile(s, tabs) {
     const n = linked.get(t.id);
     if (n) {
       n.windowId = t.windowId;
-      if (!isBlank(tabUrl(t))) {
+      if (!isIgnored(tabUrl(t))) {
         n.url = tabUrl(t);
         n.title = t.title || n.url;
       }
@@ -345,17 +335,47 @@ async function createGroupWindow(s, g, opts, refWindowId) {
   return w;
 }
 
-// The default group adopts a browser window nobody else owns (preferably the one you're using).
-async function mapInboxWindow(s) {
-  const inbox = s.groups.find((g) => g.id === INBOX);
-  if (!inbox || (await liveGroupWindow(inbox)) != null) return;
-  const owned = new Set(s.groups.filter((g) => g !== inbox && g.windowId != null).map((g) => g.windowId));
-  const free = (await chrome.windows.getAll({ windowTypes: ['normal'] })).filter((w) => !owned.has(w.id));
-  const w = free.find((x) => x.focused) || free[free.length - 1];
-  if (!w) return void delete inbox.windowId;
-  inbox.windowId = w.id;
-  const bounds = await boundsOf(w.id);
-  if (Object.keys(bounds).length) inbox.bounds = bounds;
+// Every browser window is a group. A window nobody owns gets a new group of its own, named
+// "Window N"; it's deleted again if the window closes while it is still empty and unrenamed.
+async function ensureWindowGroup(s, windowId) {
+  if (windowId == null) return null;
+  const owner = s.groups.find((g) => g.windowId === windowId);
+  if (owner) return owner;
+  const w = await chrome.windows.get(windowId).catch(() => null);
+  if (!w || w.type !== 'normal' || w.incognito) return null;
+  const used = s.groups.map((g) => /^Window (\d+)$/.exec(g.name)?.[1]).filter(Boolean).map(Number);
+  const g = {
+    id: uid(),
+    name: `Window ${Math.max(0, ...used) + 1}`,
+    collapsed: false,
+    color: (s.groups.length % 8) + 1,
+    windowId,
+    auto: true,
+  };
+  const bounds = await boundsOf(windowId);
+  if (Object.keys(bounds).length) g.bounds = bounds;
+  s.groups.push(g);
+  return g;
+}
+
+// Link open tabs to the outline: re-link saved tabs, give each window a group (an existing group
+// that holds most of its tabs, else a new one), then adopt the tabs that had no group yet.
+async function reconcileAll(s) {
+  reconcile(s, await chrome.tabs.query({}));
+  relinkGroupWindows(s);
+  await assignWindowGroups(s);
+  reconcile(s, await chrome.tabs.query({}));
+}
+
+// Give every unowned window a group and move the tabs it holds into it.
+async function assignWindowGroups(s) {
+  for (const w of await chrome.windows.getAll({ windowTypes: ['normal'] })) {
+    if (s.groups.some((g) => g.windowId === w.id)) continue;
+    const g = await ensureWindowGroup(s, w.id);
+    if (!g) continue;
+    const mine = s.nodes.filter((n) => n.tabId != null && n.windowId === w.id && n.groupId !== g.id).map((n) => n.id);
+    if (mine.length) moveNodes(s, mine, g.id, null);
+  }
 }
 
 // After a restart Chrome restores the windows but the group links are gone. Give each group the
@@ -367,8 +387,9 @@ function relinkGroupWindows(s) {
     for (const n of s.nodes) if (n.groupId === g.id && n.tabId != null) counts.set(n.windowId, (counts.get(n.windowId) || 0) + 1);
     for (const [windowId, count] of counts) overlaps.push({ g, windowId, count });
   }
-  const takenGroups = new Set();
-  const takenWindows = new Set();
+  const owned = s.groups.filter((g) => g.windowId != null);
+  const takenGroups = new Set(owned);
+  const takenWindows = new Set(owned.map((g) => g.windowId));
   for (const { g, windowId } of overlaps.sort((a, b) => b.count - a.count)) {
     if (takenGroups.has(g) || takenWindows.has(windowId)) continue;
     g.windowId = windowId;
@@ -381,7 +402,6 @@ function relinkGroupWindows(s) {
 async function ensureInWindow(s, g, tabId) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   if (!tab) return;
-  if (g.id === INBOX) await mapInboxWindow(s);
   const windowId = await liveGroupWindow(g);
   if (windowId != null) {
     if (tab.windowId !== windowId) await chrome.tabs.move(tabId, { windowId, index: -1 }).catch(() => {});
@@ -404,7 +424,6 @@ async function openNode(s, n, active) {
     }
   }
   const g = s.groups.find((x) => x.id === n.groupId);
-  if (g?.id === INBOX) await mapInboxWindow(s);
   const windowId = g && (await liveGroupWindow(g));
   const target = await targetWindowId();
   let t;
@@ -421,8 +440,7 @@ async function openNode(s, n, active) {
 // ---------- commands from the panel ----------
 const commands = {
   async sync(s) {
-    await mapInboxWindow(s);
-    reconcile(s, await chrome.tabs.query({}));
+    await reconcileAll(s);
     return { state: s };
   },
   open: (s, m) => openNode(s, s.nodes.find((n) => n.id === m.nodeId), true),
@@ -459,7 +477,10 @@ const commands = {
   },
   renameGroup(s, m) {
     const g = s.groups.find((x) => x.id === m.groupId);
-    if (g && m.name?.trim()) g.name = m.name.trim();
+    if (g && m.name?.trim()) {
+      g.name = m.name.trim();
+      delete g.auto;
+    }
   },
   toggleGroup(s, m) {
     const g = s.groups.find((x) => x.id === m.groupId);
@@ -472,25 +493,18 @@ const commands = {
     const g = s.groups.find((x) => x.id === m.groupId);
     if (g && Number.isInteger(m.color) && m.color >= 0) g.color = m.color;
   },
-  // m.tabs: 'move' (default) sends the group's tabs to the default group; 'close' closes them all.
+  // Deleting a group closes all of its tabs.
   async deleteGroup(s, m) {
-    if (m.groupId === INBOX) return;
     const members = s.nodes.filter((n) => n.groupId === m.groupId);
     s.groups = s.groups.filter((g) => g.id !== m.groupId);
-    if (m.tabs === 'close') {
-      // Not remembered for position restore: the group they'd return to is gone.
-      const gone = new Set(members);
-      s.nodes = s.nodes.filter((n) => !gone.has(n));
-      await closeTabs(members.filter((n) => n.tabId != null).map((n) => n.tabId), { closeEmptyWindows: true });
-      return;
-    }
-    const inbox = s.groups.find((g) => g.id === INBOX);
-    for (const n of members) n.groupId = INBOX;
-    for (const n of members) if (n.tabId != null) await ensureInWindow(s, inbox, n.tabId);
+    // Not remembered for position restore: the group they'd return to is gone.
+    const gone = new Set(members);
+    s.nodes = s.nodes.filter((n) => !gone.has(n));
+    await closeTabs(members.filter((n) => n.tabId != null).map((n) => n.tabId), { closeEmptyWindows: true });
+    await assignWindowGroups(s); // a last surviving window still needs a group
   },
   // Gather every group's open tabs into that group's window (opens windows as needed).
   async arrangeWindows(s) {
-    await mapInboxWindow(s);
     for (const g of s.groups) {
       for (const n of s.nodes.filter((x) => x.groupId === g.id && x.tabId != null)) await ensureInWindow(s, g, n.tabId);
     }
@@ -526,7 +540,7 @@ const commands = {
   // Replace all groups and tabs with an exported backup; live tabs re-link by URL.
   async importState(s, m) {
     applyImport(s, m.data);
-    reconcile(s, await chrome.tabs.query({}));
+    await reconcileAll(s);
     return { state: s };
   },
   // Turn sync with the Google account on or off.
@@ -541,7 +555,7 @@ const commands = {
       const snap = await pullSync(true);
       if (snap) {
         applyImport(s, snap);
-        reconcile(s, await chrome.tabs.query({}));
+        await reconcileAll(s);
         await chrome.storage.sync.set({ tb_on: true });
         return { state: s, restored: true };
       }
@@ -556,8 +570,7 @@ const commands = {
   },
   async newTab(s, m) {
     const g = s.groups.find((x) => x.id === m.groupId);
-    if (g?.id === INBOX) await mapInboxWindow(s);
-    const windowId = g && (await liveGroupWindow(g));
+      const windowId = g && (await liveGroupWindow(g));
     const target = await targetWindowId();
     let t;
     if (g && windowId == null) {
@@ -579,16 +592,34 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
 });
 
 // ---------- tab events ----------
-// Put a tab that was restored from the closed list back into its old group's window.
+// Put a tab that was restored from the closed list back into its old group's window. If that
+// group has no window any more, the tab stays where it is and joins that window's group instead.
 async function returnToGroupWindow(s, n) {
-  const g = n && s.groups.find((x) => x.id === n.groupId);
+  if (!n) return;
+  const g = s.groups.find((x) => x.id === n.groupId);
   const windowId = g && (await liveGroupWindow(g));
-  if (windowId != null && n.windowId !== windowId) await chrome.tabs.move(n.tabId, { windowId, index: -1 }).catch(() => {});
+  if (windowId != null) {
+    if (n.windowId !== windowId) await chrome.tabs.move(n.tabId, { windowId, index: -1 }).catch(() => {});
+    return;
+  }
+  const here = s.groups.find((x) => x.windowId === n.windowId);
+  if (here && here.id !== n.groupId) moveNodes(s, [n.id], here.id, null);
+}
+
+// A tab opened with "new tab" in a group goes into that group.
+function applyPendingGroup(s, tabId) {
+  if (s.pendingGroup?.tabId !== tabId) return;
+  const added = s.nodes.find((x) => x.tabId === tabId);
+  if (added) moveNodes(s, [added.id], s.pendingGroup.groupId, null);
+  delete s.pendingGroup;
 }
 
 chrome.tabs.onCreated.addListener((t) =>
   run(async (s) => {
-    if (!s.nodes.some((n) => n.tabId === t.id)) await returnToGroupWindow(s, adopt(s, t));
+    if (s.nodes.some((n) => n.tabId === t.id)) return;
+    await ensureWindowGroup(s, t.windowId);
+    await returnToGroupWindow(s, adopt(s, t));
+    applyPendingGroup(s, t.id);
   })
 );
 
@@ -596,44 +627,40 @@ chrome.tabs.onUpdated.addListener((id, change, t) =>
   run(async (s) => {
     const n = s.nodes.find((x) => x.tabId === id);
     if (!n) {
-      if (!isBlank(tabUrl(t))) {
+      if (!isIgnored(tabUrl(t))) {
+        await ensureWindowGroup(s, t.windowId);
         await returnToGroupWindow(s, adopt(s, t));
-        if (s.pendingGroup?.tabId === id) {
-          const added = s.nodes.find((x) => x.tabId === id);
-          if (added) moveNodes(s, [added.id], s.pendingGroup.groupId, null);
-          delete s.pendingGroup;
-        }
+        applyPendingGroup(s, id);
       }
       return;
     }
-    if (change.url && !isBlank(change.url)) n.url = change.url;
+    if (change.url && !isIgnored(change.url)) n.url = change.url;
     if (change.title) n.title = change.title;
     n.windowId = t.windowId;
   })
 );
 
 // Closing a tab removes it from the outline. When its whole window is closing
-// (e.g. Chrome quitting) keep it as a saved entry so it survives a restart.
+// (e.g. Chrome quitting) keep it as a saved entry so it survives a restart (except new-tab pages).
 chrome.tabs.onRemoved.addListener((id, info) =>
   run((s) => {
     const n = s.nodes.find((x) => x.tabId === id);
     if (n) {
-      if (info.isWindowClosing) n.tabId = null;
-      else removeNode(s, n);
+      if (!info.isWindowClosing || isNewTabPage(n.url)) removeNode(s, n);
+      else n.tabId = null; // keep a closing window's tabs saved; an empty new-tab page isn't worth saving
     }
     if (s.pendingGroup?.tabId === id) delete s.pendingGroup;
   })
 );
 
-// Dragging a tab into another group's window moves it into that group (an unowned window means the default group).
+// Dragging a tab into another group's window moves it into that group (a new window becomes a new group).
 chrome.tabs.onAttached.addListener((tabId, info) =>
-  run((s) => {
+  run(async (s) => {
     const n = s.nodes.find((x) => x.tabId === tabId);
     if (!n) return;
     n.windowId = info.newWindowId;
-    const owner = s.groups.find((x) => x.windowId === info.newWindowId);
-    const groupId = owner?.id ?? INBOX; // unowned windows are the default group's territory
-    if (groupId !== n.groupId) moveNodes(s, [n.id], groupId, null);
+    const owner = await ensureWindowGroup(s, info.newWindowId); // a window nobody owns becomes a new group
+    if (owner && owner.id !== n.groupId) moveNodes(s, [n.id], owner.id, null);
   })
 );
 
@@ -653,9 +680,18 @@ chrome.windows.onBoundsChanged?.addListener((w) => {
   );
 });
 
+chrome.windows.onCreated.addListener((w) => {
+  if (w.type === 'normal') run((s) => ensureWindowGroup(s, w.id).then(() => {}));
+});
+
 chrome.windows.onRemoved.addListener((windowId) =>
   run((s) => {
-    for (const g of s.groups) if (g.windowId === windowId) delete g.windowId;
+    for (const g of s.groups) {
+      if (g.windowId !== windowId) continue;
+      delete g.windowId;
+      // A window group nobody used or renamed goes away with its window.
+      if (g.auto && !s.nodes.some((n) => n.groupId === g.id)) s.groups = s.groups.filter((x) => x !== g);
+    }
   })
 );
 
@@ -673,9 +709,7 @@ chrome.runtime.onStartup.addListener(async () => {
   await run(async (s) => {
     for (const n of s.nodes) n.tabId = null;
     for (const g of s.groups) delete g.windowId; // window IDs don't survive a restart
-    reconcile(s, await chrome.tabs.query({}));
-    relinkGroupWindows(s);
-    await mapInboxWindow(s);
+    await reconcileAll(s);
   });
   // Optional (⚙ menu): open the Tabolith window along with Chrome.
   const { openOnStartup } = await chrome.storage.local.get('openOnStartup');
@@ -693,6 +727,6 @@ chrome.runtime.onInstalled.addListener(() =>
         console.error('Tabolith: sync restore failed', e);
       }
     }
-    reconcile(s, await chrome.tabs.query({}));
+    await reconcileAll(s);
   })
 );
